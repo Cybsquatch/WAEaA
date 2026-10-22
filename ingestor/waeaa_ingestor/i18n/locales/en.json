@@ -1,0 +1,19 @@
+{
+  "app.title": "WAEaA Ingestor",
+  "app.subtitle": "Evidence parsing, automated analysis and reporting",
+  "menu.file": "&File",
+  "menu.open": "&Open evidence archive...",
+  "menu.quit": "&Quit",
+  "menu.language": "&Language",
+  "menu.help": "&Help",
+  "menu.about": "&About",
+  "main.select_archive": "Select a WAEaA evidence archive (.zip) to start the analysis.",
+  "main.open_button": "Open archive...",
+  "main.output_dir": "Output directory",
+  "main.start": "Start analysis",
+  "dialog.open_title": "Open evidence archive",
+  "dialog.zip_filter": "WAEaA evidence archive (*.zip)",
+  "about.text": "{name} {version}\nProprietary software. Third-party licenses: see THIRD_PARTY_NOTICES.md.",
+  "status.ready": "Ready",
+  "status.selected": "Selected: {path}"
+}

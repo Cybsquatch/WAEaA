@@ -1,0 +1,19 @@
+{
+  "app.title": "WAEaA Ingestor",
+  "app.subtitle": "Analyse des preuves, analyse automatisée et rapports",
+  "menu.file": "&Fichier",
+  "menu.open": "&Ouvrir une archive de preuves...",
+  "menu.quit": "&Quitter",
+  "menu.language": "&Langue",
+  "menu.help": "&Aide",
+  "menu.about": "À &propos",
+  "main.select_archive": "Sélectionnez une archive de preuves WAEaA (.zip) pour démarrer l'analyse.",
+  "main.open_button": "Ouvrir une archive...",
+  "main.output_dir": "Répertoire de sortie",
+  "main.start": "Démarrer l'analyse",
+  "dialog.open_title": "Ouvrir une archive de preuves",
+  "dialog.zip_filter": "Archive de preuves WAEaA (*.zip)",
+  "about.text": "{name} {version}\nLogiciel propriétaire. Licences tierces : voir THIRD_PARTY_NOTICES.md.",
+  "status.ready": "Prêt",
+  "status.selected": "Sélectionné : {path}"
+}

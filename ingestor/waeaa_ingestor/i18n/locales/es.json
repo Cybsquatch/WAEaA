@@ -1,0 +1,19 @@
+{
+  "app.title": "WAEaA Ingestor",
+  "app.subtitle": "Análisis de evidencias, análisis automático e informes",
+  "menu.file": "&Archivo",
+  "menu.open": "&Abrir archivo de evidencias...",
+  "menu.quit": "&Salir",
+  "menu.language": "&Idioma",
+  "menu.help": "A&yuda",
+  "menu.about": "A&cerca de",
+  "main.select_archive": "Seleccione un archivo de evidencias WAEaA (.zip) para iniciar el análisis.",
+  "main.open_button": "Abrir archivo...",
+  "main.output_dir": "Directorio de salida",
+  "main.start": "Iniciar análisis",
+  "dialog.open_title": "Abrir archivo de evidencias",
+  "dialog.zip_filter": "Archivo de evidencias WAEaA (*.zip)",
+  "about.text": "{name} {version}\nSoftware propietario. Licencias de terceros: véase THIRD_PARTY_NOTICES.md.",
+  "status.ready": "Listo",
+  "status.selected": "Seleccionado: {path}"
+}

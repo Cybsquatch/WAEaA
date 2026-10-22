@@ -1,0 +1,16 @@
+# Normalise line endings for text files, keep binary test samples untouched.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+
+# Binary forensic samples used by the test-suites.
+*.evtx binary
+*.dat binary
+*.pf binary
+*.hve binary
+*.bin binary
+*.zip binary
+*.lnk binary
+*.db binary
+*.sqlite binary
+*.edb binary

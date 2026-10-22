@@ -1,0 +1,19 @@
+{
+  "app.title": "WAEaA Ingestor",
+  "app.subtitle": "Auswertung von Beweismitteln, automatisierte Analyse und Berichte",
+  "menu.file": "&Datei",
+  "menu.open": "Beweismittelarchiv ö&ffnen...",
+  "menu.quit": "&Beenden",
+  "menu.language": "&Sprache",
+  "menu.help": "&Hilfe",
+  "menu.about": "Ü&ber",
+  "main.select_archive": "Wählen Sie ein WAEaA-Beweismittelarchiv (.zip), um die Analyse zu starten.",
+  "main.open_button": "Archiv öffnen...",
+  "main.output_dir": "Ausgabeverzeichnis",
+  "main.start": "Analyse starten",
+  "dialog.open_title": "Beweismittelarchiv öffnen",
+  "dialog.zip_filter": "WAEaA-Beweismittelarchiv (*.zip)",
+  "about.text": "{name} {version}\nProprietäre Software. Lizenzen Dritter: siehe THIRD_PARTY_NOTICES.md.",
+  "status.ready": "Bereit",
+  "status.selected": "Ausgewählt: {path}"
+}

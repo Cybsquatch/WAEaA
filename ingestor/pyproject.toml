@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "waeaa-ingestor"
+version = "0.1.0.dev0"
+description = "WAEaA Ingestor: parses WAEaA evidence archives, runs detections and builds an HTML report."
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+readme = "README.md"
+# Runtime dependencies: only licenses compatible with proprietary
+# distribution (see THIRD_PARTY_NOTICES.md at the repository root).
+dependencies = [
+    "PySide6-Essentials>=6.6",  # LGPL-3.0, dynamically linked
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-cov>=5",
+    "ruff>=0.6",
+    "mypy>=1.10",
+    "pyinstaller>=6",
+]
+
+# GUI-only entry point: "gui-scripts" produces a windowed launcher on Windows
+# (no console). The ingestor intentionally has no command-line interface.
+[project.gui-scripts]
+waeaa-ingestor = "waeaa_ingestor.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["waeaa_ingestor*"]
+
+[tool.setuptools.package-data]
+waeaa_ingestor = ["i18n/locales/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N", "S", "SIM", "D"]
+ignore = ["D203", "D213"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "D"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["waeaa_ingestor"]
+
+[[tool.mypy.overrides]]
+module = ["PySide6.*"]
+ignore_missing_imports = true

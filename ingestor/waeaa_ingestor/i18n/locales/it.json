@@ -1,0 +1,19 @@
+{
+  "app.title": "WAEaA Ingestor",
+  "app.subtitle": "Parsing delle evidenze, analisi automatica e report",
+  "menu.file": "&File",
+  "menu.open": "&Apri archivio delle evidenze...",
+  "menu.quit": "&Esci",
+  "menu.language": "&Lingua",
+  "menu.help": "&Aiuto",
+  "menu.about": "&Informazioni",
+  "main.select_archive": "Seleziona un archivio di evidenze WAEaA (.zip) per avviare l'analisi.",
+  "main.open_button": "Apri archivio...",
+  "main.output_dir": "Directory di output",
+  "main.start": "Avvia analisi",
+  "dialog.open_title": "Apri archivio delle evidenze",
+  "dialog.zip_filter": "Archivio di evidenze WAEaA (*.zip)",
+  "about.text": "{name} {version}\nSoftware proprietario. Licenze di terze parti: vedi THIRD_PARTY_NOTICES.md.",
+  "status.ready": "Pronto",
+  "status.selected": "Selezionato: {path}"
+}

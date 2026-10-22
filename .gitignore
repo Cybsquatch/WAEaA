@@ -1,0 +1,42 @@
+# --- Build output ---
+/dist/
+/build/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.*
+
+# --- Go ---
+/collector/bin/
+/collector/vendor/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+/ingestor/build/output/
+
+# --- Test / runtime artefacts ---
+# Collected evidence must never be committed by mistake.
+*.zip
+!**/testdata/**/*.zip
+/collector/**/testdata/tmp/
+/output/
+
+# --- IDE / OS ---
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
