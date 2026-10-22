@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from waeaa_ingestor.archive.reader import EvidenceArchive
+from waeaa_ingestor.detection.engine import DetectionEngine
+from waeaa_ingestor.detection.models import Finding
 from waeaa_ingestor.parsers.base import ParsedRecord
 from waeaa_ingestor.parsers.registry import find_parser, get_default_parsers
 from waeaa_ingestor.timeline.builder import SuperTimeline
@@ -15,7 +17,7 @@ from waeaa_ingestor.timeline.builder import SuperTimeline
 
 @dataclass
 class PipelineResult:
-    """Summary of the completed ingestion and parsing run."""
+    """Summary of the completed ingestion, parsing, and detection run."""
 
     archive_path: Path
     output_dir: Path
@@ -27,10 +29,12 @@ class PipelineResult:
     parsed_by_type: dict[str, int] = field(default_factory=dict)
     records: list[ParsedRecord] = field(default_factory=list)
     timeline: SuperTimeline = field(default_factory=SuperTimeline)
+    findings: list[Finding] = field(default_factory=list)
+    findings_by_severity: dict[str, int] = field(default_factory=dict)
 
 
 class IngestionPipeline:
-    """Executes the extraction, parsing, and timeline generation pipeline."""
+    """Executes the extraction, parsing, detection, and timeline pipeline."""
 
     def __init__(
         self,
@@ -43,14 +47,17 @@ class IngestionPipeline:
         self.output_dir = Path(output_dir)
         self.progress_callback = progress_callback
         self.parsers = get_default_parsers()
+        self.detection_engine = DetectionEngine()
 
     def run(self) -> PipelineResult:
         """Execute the ingestion pipeline."""
         self.output_dir.mkdir(parents=True, exist_ok=True)
         parsed_dir = self.output_dir / "parsed"
         timeline_dir = self.output_dir / "timeline"
+        findings_dir = self.output_dir / "findings"
         parsed_dir.mkdir(exist_ok=True)
         timeline_dir.mkdir(exist_ok=True)
+        findings_dir.mkdir(exist_ok=True)
 
         with EvidenceArchive(self.archive_path) as archive:
             hostname = archive.hostname
@@ -115,6 +122,21 @@ class IngestionPipeline:
                 csv_path = parsed_dir / f"{t.lower()}_records.csv"
                 self._write_records_csv(csv_path, recs)
 
+            # Run proprietary detection engine & threat intel
+            if self.progress_callback:
+                self.progress_callback(0.90, "Evaluating detection rules...")
+
+            result.findings = self.detection_engine.analyze(
+                result.records, manifest=archive.manifest
+            )
+            result.findings_by_severity = self.detection_engine.get_severity_counts(result.findings)
+
+            with (findings_dir / "findings.json").open("w", encoding="utf-8") as f:
+                self.detection_engine.write_json(result.findings, f)
+
+            with (findings_dir / "findings.csv").open("w", encoding="utf-8", newline="") as f:
+                self.detection_engine.write_csv(result.findings, f)
+
             # Build and sort super-timeline
             if self.progress_callback:
                 self.progress_callback(0.95, "Sorting and finalizing super-timeline...")
@@ -129,7 +151,7 @@ class IngestionPipeline:
                 result.timeline.write_json(f)
 
             if self.progress_callback:
-                self.progress_callback(1.0, "Parsing and timeline generation complete.")
+                self.progress_callback(1.0, "Analysis complete.")
 
             return result
 

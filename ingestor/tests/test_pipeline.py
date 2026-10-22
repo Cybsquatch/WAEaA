@@ -20,7 +20,9 @@ def test_ingestion_pipeline_end_to_end(tmp_path: Path) -> None:
         b" from 10.10.10.1 port 55444 ssh2\n"
     )
 
-    bash_history_content = b"#1729600000\nwhoami\n#1729600005\nid\n"
+    bash_history_content = (
+        b"#1729600000\nwhoami\n#1729600005\nid\n#1729600010\ncat /etc/shadow\n"
+    )
 
     manifest_data = [
         {
@@ -64,10 +66,17 @@ def test_ingestion_pipeline_end_to_end(tmp_path: Path) -> None:
     timeline_csv = out_dir / "timeline" / "super_timeline.csv"
     timeline_json = out_dir / "timeline" / "super_timeline.json"
     parsed_syslog_csv = out_dir / "parsed" / "syslog_records.csv"
+    findings_json = out_dir / "findings" / "findings.json"
+    findings_csv = out_dir / "findings" / "findings.csv"
 
     assert timeline_csv.is_file()
     assert timeline_json.is_file()
     assert parsed_syslog_csv.is_file()
+    assert findings_json.is_file()
+    assert findings_csv.is_file()
+
+    assert len(result.findings) >= 1
+    assert any(f.rule_id == "waeaa.linux.shadow_access" for f in result.findings)
 
     with timeline_csv.open("r", encoding="utf-8") as f:
         content = f.read()
