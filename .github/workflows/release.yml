@@ -1,0 +1,67 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v1.0.0)"
+        required: true
+        default: "v1.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and Publish Release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Go (Modern)
+        uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+          cache-dependency-path: collector/go.sum
+
+      - name: Install Legacy Go 1.20
+        shell: powershell
+        run: |
+          go install golang.org/dl/go1.20.14@latest
+          & "$HOME\go\bin\go1.20.14.exe" download
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build Collectors
+        shell: powershell
+        run: |
+          $ver = "${{ github.ref_name }}"
+          if (-not $ver -or $ver -eq "main") { $ver = "${{ inputs.tag }}" }
+          $ver = $ver.TrimStart("v")
+          .\scripts\build.ps1 -Version $ver
+
+      - name: Package Release Archives
+        shell: powershell
+        run: |
+          $ver = "${{ github.ref_name }}"
+          if (-not $ver -or $ver -eq "main") { $ver = "${{ inputs.tag }}" }
+          $ver = $ver.TrimStart("v")
+          .\scripts\package_release.ps1 -Version $ver
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: WAEaA ${{ github.ref_name || inputs.tag }}
+          tag_name: ${{ github.ref_name || inputs.tag }}
+          body_path: RELEASE_NOTES.md
+          files: |
+            dist/release/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
