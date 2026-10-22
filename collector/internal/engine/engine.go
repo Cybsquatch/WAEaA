@@ -18,7 +18,10 @@ import (
 	"github.com/Cybsquatch/WAEaA/collector/internal/evidence"
 	"github.com/Cybsquatch/WAEaA/collector/internal/i18n"
 	"github.com/Cybsquatch/WAEaA/collector/internal/logging"
+	"github.com/Cybsquatch/WAEaA/collector/internal/ntfs"
+	"github.com/Cybsquatch/WAEaA/collector/internal/privilege"
 	"github.com/Cybsquatch/WAEaA/collector/internal/rules"
+	"github.com/Cybsquatch/WAEaA/collector/internal/vss"
 	rulesfs "github.com/Cybsquatch/WAEaA/collector/rules"
 )
 
@@ -26,6 +29,11 @@ import (
 func Run(opts *cli.Options, logger *logging.Logger, tr *i18n.Translator) error {
 	startTime := time.Now().UTC()
 	logger.Info("Starting WAEaA acquisition", "start_utc", startTime.Format(time.RFC3339))
+
+	// Ensure forensic bypass privileges are enabled for reading locked files
+	if err := privilege.EnableBackupPrivilege(); err != nil {
+		logger.Debug("Could not enable backup privileges", "err", err)
+	}
 
 	// In-memory buffer to mirror the collection log for the evidence package
 	var logBuf bytes.Buffer
@@ -141,6 +149,69 @@ func Run(opts *cli.Options, logger *logging.Logger, tr *i18n.Translator) error {
 					path := filepath.Join(basePath, entry.Name())
 					if shouldCollectFile(path, info, target, opts) {
 						collectFile(path, info, target, opts, sink, manifest, dedupMap, &dedupCount, wantMD5, wantSHA1, logger)
+					}
+				}
+			}
+		}
+	}
+
+	// Process Volume Shadow Copies if requested
+	if opts.VSS {
+		snapshots, err := vss.ListSnapshots(opts.Source)
+		if err != nil {
+			logger.Warn("Failed querying Volume Shadow Copies", "err", err)
+		} else {
+			logger.Info("Discovered Volume Shadow Copies", "count", len(snapshots))
+			for _, snap := range snapshots {
+				logger.Info("Processing Shadow Copy", "id", snap.ID, "device", snap.DeviceObject)
+				vssSource := snap.DeviceObject + `\`
+				for _, target := range targets {
+					expandedPaths, err := ExpandPath(vssSource, target.Path)
+					if err != nil {
+						continue
+					}
+					vssTarget := target
+					vssTarget.Comment = fmt.Sprintf("%s [VSS: %s]", target.Comment, snap.ID)
+					for _, basePath := range expandedPaths {
+						fi, err := os.Stat(basePath)
+						if err != nil {
+							continue
+						}
+						if !fi.IsDir() {
+							if shouldCollectFile(basePath, fi, vssTarget, opts) {
+								collectFile(basePath, fi, vssTarget, opts, sink, manifest, dedupMap, &dedupCount, wantMD5, wantSHA1, logger)
+							}
+							continue
+						}
+						if vssTarget.Recursive {
+							_ = filepath.Walk(basePath, func(path string, info os.FileInfo, err error) error {
+								if err != nil || info.IsDir() {
+									return nil
+								}
+								if shouldCollectFile(path, info, vssTarget, opts) {
+									collectFile(path, info, vssTarget, opts, sink, manifest, dedupMap, &dedupCount, wantMD5, wantSHA1, logger)
+								}
+								return nil
+							})
+						} else {
+							entries, err := os.ReadDir(basePath)
+							if err != nil {
+								continue
+							}
+							for _, entry := range entries {
+								if entry.IsDir() {
+									continue
+								}
+								info, err := entry.Info()
+								if err != nil {
+									continue
+								}
+								path := filepath.Join(basePath, entry.Name())
+								if shouldCollectFile(path, info, vssTarget, opts) {
+									collectFile(path, info, vssTarget, opts, sink, manifest, dedupMap, &dedupCount, wantMD5, wantSHA1, logger)
+								}
+							}
+						}
 					}
 				}
 			}
@@ -275,8 +346,23 @@ func collectFile(
 ) {
 	relPath := makeArchiveRelativePath(path)
 
-	f, err := os.Open(path)
+	// Attempt forensic open with backup semantics and full share flags
+	f, err := ntfs.OpenForensic(path)
 	if err != nil {
+		// If raw NTFS reading is advised and target is $MFT, attempt raw volume stream
+		if target.RawNTFS && strings.HasSuffix(strings.ToUpper(path), `\$MFT`) {
+			vol := filepath.VolumeName(path)
+			if vol == "" {
+				vol = opts.Source
+			}
+			if vr, vErr := ntfs.OpenVolume(vol); vErr == nil {
+				defer vr.Close()
+				logger.Info("Acquiring $MFT via raw NTFS volume reader", "volume", vol)
+				stream := vr.ReadInitialMFTStream(50000)
+				collectRawStream(path, relPath, stream, target, sink, manifest, dedupMap, dedupCount, wantMD5, wantSHA1, logger)
+				return
+			}
+		}
 		logger.Debug("Failed opening file (may be locked)", "path", path, "err", err)
 		return
 	}
@@ -356,10 +442,92 @@ func collectFile(
 	logger.Trace("Acquired file", "path", path, "size", info.Size(), "sha256", sha256Hex)
 }
 
+func collectRawStream(
+	sourcePath, archiveRelPath string,
+	r io.Reader,
+	target rules.Target,
+	sink ArchiveSink,
+	manifest *evidence.Manifest,
+	dedupMap map[string]string,
+	dedupCount *int,
+	wantMD5, wantSHA1 bool,
+	logger *logging.Logger,
+) {
+	hSHA256 := sha256.New()
+	hSHA1 := sha1.New()
+	var hMD5 io.Writer
+	if wantMD5 {
+		hMD5 = md5.New()
+	}
+
+	var writers []io.Writer
+	writers = append(writers, hSHA256, hSHA1)
+	if wantMD5 {
+		writers = append(writers, hMD5)
+	}
+
+	mw := io.MultiWriter(writers...)
+	var buf bytes.Buffer
+	tee := io.TeeReader(r, mw)
+
+	n, err := io.Copy(&buf, tee)
+	if err != nil && err != io.EOF {
+		logger.Warn("Error copying raw stream", "path", sourcePath, "err", err)
+		return
+	}
+
+	sha256Hex := hex.EncodeToString(hSHA256.Sum(nil))
+	sha1Hex := hex.EncodeToString(hSHA1.Sum(nil))
+	md5Hex := ""
+	if wantMD5 {
+		md5Hex = hex.EncodeToString(hMD5.(interface{ Sum([]byte) []byte }).Sum(nil))
+	}
+
+	now := time.Now().UTC()
+	nowUTC := now.Format(time.RFC3339Nano)
+
+	item := evidence.Item{
+		SourcePath:   sourcePath,
+		ArchivePath:  archiveRelPath,
+		Size:         n,
+		SHA256:       sha256Hex,
+		ModifiedUTC:  now.Format(time.RFC3339),
+		AcquiredUTC:  nowUTC,
+		RuleID:       target.Comment + " [Raw NTFS]",
+		Deduplicated: false,
+	}
+	if wantSHA1 {
+		item.SHA1 = sha1Hex
+	}
+	if wantMD5 {
+		item.MD5 = md5Hex
+	}
+
+	if err := sink.AddFile(archiveRelPath, &buf, n, now); err != nil {
+		logger.Warn("Failed writing raw stream to archive", "path", archiveRelPath, "err", err)
+		return
+	}
+
+	manifest.Add(item)
+	logger.Info("Acquired raw NTFS stream", "path", sourcePath, "size", n, "sha256", sha256Hex)
+}
 // makeArchiveRelativePath standardises full paths to relative archive paths
 // e.g. "C:\Windows\System32" -> "C/Windows/System32"
+// or "\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy1\Windows" -> "VSS/HarddiskVolumeShadowCopy1/Windows"
 func makeArchiveRelativePath(fullPath string) string {
 	clean := filepath.Clean(fullPath)
+
+	// Handle Volume Shadow Copy NT device paths
+	const vssPrefix = `GLOBALROOT\Device\`
+	if idx := strings.Index(clean, vssPrefix); idx >= 0 {
+		sub := clean[idx+len(vssPrefix):]
+		parts := strings.SplitN(sub, string(filepath.Separator), 2)
+		if len(parts) == 2 {
+			return filepath.ToSlash(filepath.Join("VSS", parts[0], parts[1]))
+		}
+		return filepath.ToSlash(filepath.Join("VSS", parts[0]))
+	}
+
 	vol := filepath.VolumeName(clean)
 	if vol != "" {
 		drive := strings.TrimSuffix(vol, ":")
