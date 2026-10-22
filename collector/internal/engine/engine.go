@@ -511,6 +511,7 @@ func collectRawStream(
 	manifest.Add(item)
 	logger.Info("Acquired raw NTFS stream", "path", sourcePath, "size", n, "sha256", sha256Hex)
 }
+
 // makeArchiveRelativePath standardises full paths to relative archive paths
 // e.g. "C:\Windows\System32" -> "C/Windows/System32"
 // or "\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy1\Windows" -> "VSS/HarddiskVolumeShadowCopy1/Windows"

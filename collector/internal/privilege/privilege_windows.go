@@ -16,12 +16,12 @@ var (
 	modshell32  = syscall.NewLazyDLL("shell32.dll")
 	modkernel32 = syscall.NewLazyDLL("kernel32.dll")
 
-	procOpenProcessToken       = modadvapi32.NewProc("OpenProcessToken")
-	procGetTokenInformation    = modadvapi32.NewProc("GetTokenInformation")
-	procLookupPrivilegeValueW  = modadvapi32.NewProc("LookupPrivilegeValueW")
-	procAdjustTokenPrivileges  = modadvapi32.NewProc("AdjustTokenPrivileges")
-	procShellExecuteW          = modshell32.NewProc("ShellExecuteW")
-	procGetCurrentProcess      = modkernel32.NewProc("GetCurrentProcess")
+	procOpenProcessToken      = modadvapi32.NewProc("OpenProcessToken")
+	procGetTokenInformation   = modadvapi32.NewProc("GetTokenInformation")
+	procLookupPrivilegeValueW = modadvapi32.NewProc("LookupPrivilegeValueW")
+	procAdjustTokenPrivileges = modadvapi32.NewProc("AdjustTokenPrivileges")
+	procShellExecuteW         = modshell32.NewProc("ShellExecuteW")
+	procGetCurrentProcess     = modkernel32.NewProc("GetCurrentProcess")
 )
 
 const (

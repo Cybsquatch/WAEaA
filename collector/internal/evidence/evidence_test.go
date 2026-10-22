@@ -54,18 +54,18 @@ func TestManifestCSVAndJSON(t *testing.T) {
 
 func TestCustodyHTMLAndJSON(t *testing.T) {
 	rec := &Record{
-		CaseID:             "CASE-2026-99",
-		Examiner:           "Forensic Analyst",
-		Hostname:           "WIN-TARGET",
-		OS:                 "windows",
-		Platform:           "Windows 10",
-		Architecture:       "amd64",
-		TotalItems:         42,
-		TotalBytes:         100000,
-		ArchiveName:        "WIN-TARGET.zip",
-		ArchiveSHA256:      "abcdef1234567890",
-		RulesExecuted:      []string{"triage", "win.eventlogs"},
-		Authorized:         true,
+		CaseID:        "CASE-2026-99",
+		Examiner:      "Forensic Analyst",
+		Hostname:      "WIN-TARGET",
+		OS:            "windows",
+		Platform:      "Windows 10",
+		Architecture:  "amd64",
+		TotalItems:    42,
+		TotalBytes:    100000,
+		ArchiveName:   "WIN-TARGET.zip",
+		ArchiveSHA256: "abcdef1234567890",
+		RulesExecuted: []string{"triage", "win.eventlogs"},
+		Authorized:    true,
 	}
 
 	var jsonBuf bytes.Buffer

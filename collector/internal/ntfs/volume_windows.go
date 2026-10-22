@@ -15,12 +15,12 @@ import (
 
 // BootSector represents the essential fields of an NTFS Volume Boot Record.
 type BootSector struct {
-	BytesPerSector     uint16
-	SectorsPerCluster  uint8
-	MFTClusterStart    int64
-	ClustersPerRecord  int8
-	BytesPerMFTRecord  uint32
-	ClusterSize        uint32
+	BytesPerSector    uint16
+	SectorsPerCluster uint8
+	MFTClusterStart   int64
+	ClustersPerRecord int8
+	BytesPerMFTRecord uint32
+	ClusterSize       uint32
 }
 
 // VolumeReader provides raw sector-level read access to an NTFS partition.
