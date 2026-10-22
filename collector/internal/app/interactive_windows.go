@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"unsafe"
 
-	"github.com/Cybsquatch/WAEaA/collector/internal/i18n"
+	"github.com/Cybsquatch/WAEaA/collector/internal/gui"
 	"github.com/Cybsquatch/WAEaA/collector/internal/privilege"
 )
 
@@ -38,8 +38,6 @@ func detachConsole() {
 // elevated, it requests UAC elevation. If the program owns its console
 // (double-click launch), the console is released first.
 func runInteractive(stdout, stderr io.Writer, prog string) int {
-	tr := i18n.MustNew(i18n.Detect())
-
 	// Ensure administrator rights for GUI mode so locked files ($MFT, registry) can be acquired
 	if !privilege.IsAdmin() {
 		if err := privilege.RelaunchElevated(nil); err == nil {
@@ -58,16 +56,11 @@ func runInteractive(stdout, stderr io.Writer, prog string) int {
 	// Enable forensic token privileges (SeBackupPrivilege, etc.)
 	_ = privilege.EnableBackupPrivilege()
 
+	// If started by double-click from Explorer, detach the console window
 	if ownsConsole() {
-		// Until the GUI exists, keep the console so the message is readable.
-		fmt.Fprintln(stdout, tr.T("interactive.not_implemented"))
-		fmt.Fprint(stdout, "\n[Enter]")
-		_, _ = fmt.Scanln()
-		return ExitOK
+		detachConsole()
 	}
-	fmt.Fprintln(stderr, tr.T("interactive.not_implemented"))
-	return ExitUsage
-}
 
-// Ensure detachConsole is referenced until the GUI uses it (M4).
-var _ = detachConsole
+	// Launch native Windows GUI
+	return gui.Run()
+}
