@@ -28,16 +28,20 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go }}
-          cache: false   # no third-party modules yet (no go.sum)
+          cache-dependency-path: collector/go.sum
       - name: gofmt
         if: matrix.os == 'ubuntu-latest'
         run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - name: vet
         run: go vet ./...
-      - name: test
+      - name: test (Linux with race detector)
+        if: matrix.os == 'ubuntu-latest' && matrix.go == 'stable'
         run: go test -race -coverprofile=coverage.out ./...
+      - name: test (standard)
+        if: matrix.os != 'ubuntu-latest' || matrix.go != 'stable'
+        run: go test -coverprofile=coverage.out ./...
       - name: build
-        run: go build -trimpath -o ${{ runner.temp }}/waeaa${{ matrix.os == 'windows-latest' && '.exe' || '' }} ./cmd/waeaa
+        run: go build -trimpath -o bin/waeaa${{ matrix.os == 'windows-latest' && '.exe' || '' }} ./cmd/waeaa
 
   # ----------------------------------------------------------------- ingestor
   ingestor:
