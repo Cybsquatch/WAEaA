@@ -1,0 +1,12 @@
+id: linux.suse.logs
+name: openSUSE & SLES Package and System Logs
+description: Zypper package manager logs and system messages on SUSE enterprise and openSUSE systems.
+category: Logs
+os: linux
+targets:
+  - path: '/var/log'
+    mask: 'zypper.log*'
+    comment: SUSE Zypper package manager log
+  - path: '/var/log'
+    mask: 'messages*'
+    comment: SUSE system messages log

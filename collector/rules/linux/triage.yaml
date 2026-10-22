@@ -1,0 +1,12 @@
+id: linux.triage
+name: Linux Incident Response Triage
+description: Complete standard Linux triage package capturing system journals, authentication logs, auditd, user accounts, bash histories, cron jobs, and SSH persistence.
+category: Compound
+os: linux
+compound: true
+rules:
+  - linux.common
+  - linux.debian.logs
+  - linux.rhel.logs
+  - linux.suse.logs
+  - linux.arch.logs

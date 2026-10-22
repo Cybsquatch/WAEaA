@@ -1,0 +1,18 @@
+id: linux.debian.logs
+name: Debian & Ubuntu Authentication and System Logs
+description: Authentication logs (auth.log), system syslog, package manager dpkg.log and apt history.
+category: Logs
+os: linux
+targets:
+  - path: '/var/log'
+    mask: 'auth.log*'
+    comment: Debian/Ubuntu authentication log
+  - path: '/var/log'
+    mask: 'syslog*'
+    comment: Debian/Ubuntu syslog
+  - path: '/var/log'
+    mask: 'dpkg.log*'
+    comment: Dpkg package installation log
+  - path: '/var/log/apt'
+    mask: 'history.log*'
+    comment: Apt history log

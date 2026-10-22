@@ -28,4 +28,16 @@ func TestLoadDefaultRegistry(t *testing.T) {
 	if len(targets) < 10 {
 		t.Errorf("expected at least 10 targets for triage, got %d", len(targets))
 	}
+
+	// Verify Linux triage compound rule resolves cleanly
+	linuxRules, linuxTargets, err := reg.Resolve([]string{"linux.triage"}, "linux")
+	if err != nil {
+		t.Fatalf("failed to resolve linux.triage rule: %v", err)
+	}
+	if len(linuxRules) < 4 {
+		t.Errorf("expected at least 4 resolved sub-rules for linux.triage, got %d", len(linuxRules))
+	}
+	if len(linuxTargets) < 15 {
+		t.Errorf("expected at least 15 targets for linux.triage, got %d", len(linuxTargets))
+	}
 }

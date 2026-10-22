@@ -1,0 +1,72 @@
+id: linux.common
+name: Linux System Forensics
+description: Core Linux forensic artefacts including login sessions, account configurations, shell history, cron, SSH keys and persistence files.
+category: System
+os: linux
+targets:
+  - path: '/var/log/journal'
+    mask: '*.journal*'
+    recursive: true
+    comment: Binary Systemd journal files
+  - path: '/var/log'
+    mask: 'wtmp*'
+    comment: Historic login records
+  - path: '/var/log'
+    mask: 'btmp*'
+    comment: Failed login attempts
+  - path: '/var/log'
+    mask: 'lastlog*'
+    comment: Last user login records
+  - path: '/etc'
+    mask: 'passwd*'
+    comment: System user accounts
+  - path: '/etc'
+    mask: 'shadow*'
+    comment: User password hashes
+  - path: '/etc'
+    mask: 'group*'
+    comment: Group memberships
+  - path: '/etc'
+    mask: 'sudoers*'
+    comment: Sudo privilege configuration
+  - path: '/etc/sudoers.d'
+    mask: '*'
+    comment: Sudo drop-in privilege rules
+  - path: '/root'
+    mask: '.*history*'
+    comment: Root user shell history
+  - path: '/home/*'
+    mask: '.*history*'
+    comment: User shell histories
+  - path: '/etc'
+    mask: 'crontab*'
+    comment: System crontab
+  - path: '/etc/cron*'
+    mask: '*'
+    recursive: true
+    comment: System cron directories
+  - path: '/var/spool/cron'
+    mask: '*'
+    recursive: true
+    comment: User crontab files
+  - path: '/root/.ssh'
+    mask: '*'
+    comment: Root SSH authorized keys and configuration
+  - path: '/home/*/.ssh'
+    mask: '*'
+    comment: User SSH authorized keys and configuration
+  - path: '/etc/ssh'
+    mask: 'sshd_config*'
+    comment: SSH daemon configuration
+  - path: '/etc'
+    mask: 'ld.so.preload*'
+    comment: Dynamic linker rootkit preload
+  - path: '/etc'
+    mask: 'ld.so.conf*'
+    comment: Dynamic linker library paths
+  - path: '/etc'
+    mask: 'modules*'
+    comment: Kernel module loading rules
+  - path: '/etc'
+    mask: 'rc.local*'
+    comment: Startup script persistence

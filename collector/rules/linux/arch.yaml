@@ -1,0 +1,9 @@
+id: linux.arch.logs
+name: Arch Linux Package Manager Logs
+description: Pacman installation and update logs on Arch Linux and Manjaro.
+category: Logs
+os: linux
+targets:
+  - path: '/var/log'
+    mask: 'pacman.log*'
+    comment: Arch Pacman package manager log

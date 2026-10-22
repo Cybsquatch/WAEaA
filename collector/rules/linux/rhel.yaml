@@ -1,0 +1,21 @@
+id: linux.rhel.logs
+name: RHEL & CentOS Security, Audit and System Logs
+description: Security log (secure), system messages, Linux audit framework logs (audit.log) and dnf/yum logs.
+category: Logs
+os: linux
+targets:
+  - path: '/var/log'
+    mask: 'secure*'
+    comment: RHEL/CentOS authentication log
+  - path: '/var/log'
+    mask: 'messages*'
+    comment: RHEL/CentOS system messages
+  - path: '/var/log/audit'
+    mask: 'audit.log*'
+    comment: Linux Auditd framework logs
+  - path: '/var/log'
+    mask: 'dnf.log*'
+    comment: DNF package manager log
+  - path: '/var/log'
+    mask: 'yum.log*'
+    comment: YUM package manager log

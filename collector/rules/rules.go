@@ -12,7 +12,7 @@ import (
 	"github.com/Cybsquatch/WAEaA/collector/internal/rules"
 )
 
-//go:embed windows/*.yaml
+//go:embed windows/*.yaml linux/*.yaml
 var embeddedRulesFS embed.FS
 
 // LoadDefaultRegistry creates and populates a rule registry with all

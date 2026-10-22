@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/Cybsquatch/WAEaA/collector/internal/i18n"
+	"github.com/Cybsquatch/WAEaA/collector/internal/tui"
 )
 
 // isTerminal reports whether f is attached to a character device (a TTY).
@@ -19,13 +20,11 @@ func isTerminal(f *os.File) bool {
 
 // runInteractive starts the terminal user interface when both stdin and
 // stdout are TTYs; otherwise (cron, pipes, remote exec) it prints a hint.
-// The TUI itself is implemented in milestone M5.
 func runInteractive(stdout, stderr io.Writer, prog string) int {
 	tr := i18n.MustNew(i18n.Detect())
 	if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
 		fmt.Fprintln(stderr, tr.T("interactive.no_terminal"))
 		return ExitUsage
 	}
-	fmt.Fprintln(stderr, tr.T("interactive.not_implemented"))
-	return ExitUsage
+	return tui.Run(os.Stdin, stdout)
 }
