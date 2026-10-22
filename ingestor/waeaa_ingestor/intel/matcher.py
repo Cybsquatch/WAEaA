@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from waeaa_ingestor.archive.reader import ManifestEntry
 from waeaa_ingestor.detection.models import Finding, MitreAttack, Severity
 from waeaa_ingestor.intel.database import ThreatIntelDB
@@ -54,7 +52,7 @@ class ThreatIntelMatcher:
                 )
 
         # 2. Check vulnerable driver filename
-        fname = Path(entry.source_path).name.lower()
+        fname = entry.source_path.replace("\\", "/").rsplit("/", 1)[-1].lower()
         vuln_desc = self.db.check_driver_name(fname)
         if vuln_desc:
             findings.append(

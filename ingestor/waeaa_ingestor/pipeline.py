@@ -108,13 +108,14 @@ class IngestionPipeline:
             # Also add filesystem metadata timestamps (MACB) from the manifest
             for m_entry in archive.manifest:
                 if m_entry.modified_utc:
+                    fname = m_entry.source_path.replace("\\", "/").rsplit("/", 1)[-1]
                     result.timeline.add_record(
                         ParsedRecord(
                             artefact_type="FileSystem",
                             source_file=m_entry.source_path,
                             timestamp_utc=m_entry.modified_utc,
                             action="FileModified",
-                            summary=f"File modified: {Path(m_entry.source_path).name}",
+                            summary=f"File modified: {fname}",
                             details={"size": m_entry.size, "sha256": m_entry.sha256},
                         )
                     )
