@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import csv
+import datetime
+import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,6 +14,7 @@ from waeaa_ingestor.detection.engine import DetectionEngine
 from waeaa_ingestor.detection.models import Finding
 from waeaa_ingestor.parsers.base import ParsedRecord
 from waeaa_ingestor.parsers.registry import find_parser, get_default_parsers
+from waeaa_ingestor.report.generator import HtmlReportGenerator, ReportData
 from waeaa_ingestor.timeline.builder import SuperTimeline
 
 
@@ -31,6 +34,8 @@ class PipelineResult:
     timeline: SuperTimeline = field(default_factory=SuperTimeline)
     findings: list[Finding] = field(default_factory=list)
     findings_by_severity: dict[str, int] = field(default_factory=dict)
+    report_path: Path | None = None
+    analysis_zip_path: Path | None = None
 
 
 class IngestionPipeline:
@@ -149,6 +154,40 @@ class IngestionPipeline:
 
             with (timeline_dir / "super_timeline.json").open("w", encoding="utf-8") as f:
                 result.timeline.write_json(f)
+
+            # Generate offline HTML report
+            if self.progress_callback:
+                self.progress_callback(0.97, "Generating standalone HTML report...")
+
+            report_data = ReportData(
+                hostname=result.hostname,
+                target_os=result.target_os,
+                analysis_time_utc=datetime.datetime.now(datetime.UTC).isoformat(),
+                custody=archive.custody,
+                findings=result.findings,
+                timeline_records=result.records,
+                parsed_by_type=result.parsed_by_type,
+                total_files_inspected=result.total_files_inspected,
+            )
+            html_content = HtmlReportGenerator(report_data).render()
+            report_path = self.output_dir / "report.html"
+            report_path.write_text(html_content, encoding="utf-8")
+            result.report_path = report_path
+
+            # Package analysis output ZIP
+            if self.progress_callback:
+                self.progress_callback(0.99, "Packaging final analysis archive...")
+
+            ts = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d_%H%M%S")
+            zip_name = f"{result.hostname}_analysis_{ts}.zip"
+            analysis_zip = self.output_dir.parent / zip_name
+            with zipfile.ZipFile(analysis_zip, "w", compression=zipfile.ZIP_DEFLATED) as z:
+                for fpath in self.output_dir.rglob("*"):
+                    if fpath.is_file():
+                        rel = fpath.relative_to(self.output_dir)
+                        z.write(fpath, arcname=str(rel))
+
+            result.analysis_zip_path = analysis_zip
 
             if self.progress_callback:
                 self.progress_callback(1.0, "Analysis complete.")

@@ -74,6 +74,9 @@ def test_ingestion_pipeline_end_to_end(tmp_path: Path) -> None:
     assert parsed_syslog_csv.is_file()
     assert findings_json.is_file()
     assert findings_csv.is_file()
+    assert (out_dir / "report.html").is_file()
+    assert result.report_path is not None and result.report_path.is_file()
+    assert result.analysis_zip_path is not None and result.analysis_zip_path.is_file()
 
     assert len(result.findings) >= 1
     assert any(f.rule_id == "waeaa.linux.shadow_access" for f in result.findings)
