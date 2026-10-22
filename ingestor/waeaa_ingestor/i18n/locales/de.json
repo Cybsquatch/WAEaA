@@ -15,5 +15,8 @@
   "dialog.zip_filter": "WAEaA-Beweismittelarchiv (*.zip)",
   "about.text": "{name} {version}\nProprietäre Software. Lizenzen Dritter: siehe THIRD_PARTY_NOTICES.md.",
   "status.ready": "Bereit",
-  "status.selected": "Ausgewählt: {path}"
+  "status.selected": "Ausgewählt: {path}",
+  "status.processing": "Archiv wird verarbeitet...",
+  "status.completed": "Analyse abgeschlossen: {count} Ereignisse verarbeitet.",
+  "status.error": "Fehler: {error}"
 }

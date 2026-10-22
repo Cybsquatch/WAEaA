@@ -15,5 +15,8 @@
   "dialog.zip_filter": "WAEaA evidence archive (*.zip)",
   "about.text": "{name} {version}\nProprietary software. Third-party licenses: see THIRD_PARTY_NOTICES.md.",
   "status.ready": "Ready",
-  "status.selected": "Selected: {path}"
+  "status.selected": "Selected: {path}",
+  "status.processing": "Processing archive...",
+  "status.completed": "Analysis complete: {count} events processed.",
+  "status.error": "Error: {error}"
 }

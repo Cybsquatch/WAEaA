@@ -15,5 +15,8 @@
   "dialog.zip_filter": "Archivo de evidencias WAEaA (*.zip)",
   "about.text": "{name} {version}\nSoftware propietario. Licencias de terceros: véase THIRD_PARTY_NOTICES.md.",
   "status.ready": "Listo",
-  "status.selected": "Seleccionado: {path}"
+  "status.selected": "Seleccionado: {path}",
+  "status.processing": "Procesando archivo...",
+  "status.completed": "Análisis completado: {count} eventos procesados.",
+  "status.error": "Error: {error}"
 }

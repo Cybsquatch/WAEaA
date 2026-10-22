@@ -38,4 +38,20 @@ def test_language_switch_and_archive_selection(qapp: QApplication) -> None:
     w.set_language("it")
     assert w._start_btn.text() == "Avvia analisi"
     assert "HOST01.zip" in w.statusBar().currentMessage()
+
+    # Test worker callbacks without starting background thread
+    w._on_worker_progress(0.5, "Parsing logs...")
+    assert w._progress_bar.value() == 50
+    assert w._status_label.text() == "Parsing logs..."
+
+    class DummyResult:
+        timeline_event_count = 42
+
+    w._on_worker_finished(DummyResult())
+    assert w._progress_bar.value() == 100
+    assert "42" in w._status_label.text()
+
+    w._on_worker_failed("Disk error")
+    assert "Disk error" in w._status_label.text()
+
     w.close()

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtCore import QThread, Signal
 from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import (
     QApplication,
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -23,6 +25,37 @@ from PySide6.QtWidgets import (
 
 from waeaa_ingestor import APP_NAME, __version__
 from waeaa_ingestor.i18n import LANGUAGE_NAMES, SUPPORTED, Translator
+from waeaa_ingestor.pipeline import IngestionPipeline
+
+
+class AnalysisWorker(QThread):
+    """Background worker executing the ingestion pipeline."""
+
+    progress = Signal(float, str)
+    finished = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, archive_path: Path, output_dir: Path) -> None:
+        """Initialize worker with input archive and output path."""
+        super().__init__()
+        self.archive_path = archive_path
+        self.output_dir = output_dir
+
+    def run(self) -> None:
+        """Run extraction and parsing pipeline in background."""
+        try:
+            pipeline = IngestionPipeline(
+                self.archive_path,
+                self.output_dir,
+                progress_callback=self._on_progress,
+            )
+            result = pipeline.run()
+            self.finished.emit(result)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+    def _on_progress(self, pct: float, msg: str) -> None:
+        self.progress.emit(pct, msg)
 
 
 class MainWindow(QMainWindow):
@@ -33,6 +66,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.tr_ = translator or Translator()
         self.archive: Path | None = None
+        self._worker: AnalysisWorker | None = None
 
         # Widgets are created once; their texts are (re)applied by _retranslate.
         self._subtitle = QLabel()
@@ -42,9 +76,25 @@ class MainWindow(QMainWindow):
         self._open_btn.clicked.connect(self.choose_archive)
         self._start_btn = QPushButton()
         self._start_btn.setEnabled(False)
+        self._start_btn.clicked.connect(self.start_analysis)
+
+        self._progress_bar = QProgressBar()
+        self._progress_bar.setRange(0, 100)
+        self._progress_bar.setValue(0)
+        self._progress_bar.setVisible(False)
+
+        self._status_label = QLabel()
+        self._status_label.setVisible(False)
 
         layout = QVBoxLayout()
-        for w in (self._subtitle, self._hint, self._open_btn, self._start_btn):
+        for w in (
+            self._subtitle,
+            self._hint,
+            self._open_btn,
+            self._start_btn,
+            self._progress_bar,
+            self._status_label,
+        ):
             layout.addWidget(w)
         layout.addStretch(1)
         central = QWidget()
@@ -131,6 +181,51 @@ class MainWindow(QMainWindow):
             self.tr_.t("menu.about").replace("&", ""),
             self.tr_.t("about.text", name=APP_NAME, version=__version__),
         )
+
+    def start_analysis(self) -> None:
+        """Start the extraction, parsing, and timeline pipeline."""
+        if not self.archive:
+            return
+
+        out_dir = self.archive.parent / f"{self.archive.stem}_analysis"
+        self._open_btn.setEnabled(False)
+        self._start_btn.setEnabled(False)
+        self._progress_bar.setVisible(True)
+        self._progress_bar.setValue(0)
+        self._status_label.setVisible(True)
+        self._status_label.setText(self.tr_.t("status.processing"))
+        self.statusBar().showMessage(self.tr_.t("status.processing"))
+
+        self._worker = AnalysisWorker(self.archive, out_dir)
+        self._worker.progress.connect(self._on_worker_progress)
+        self._worker.finished.connect(self._on_worker_finished)
+        self._worker.failed.connect(self._on_worker_failed)
+        self._worker.start()
+
+    def _on_worker_progress(self, pct: float, msg: str) -> None:
+        """Handle progress updates from the analysis worker."""
+        val = int(pct * 100)
+        self._progress_bar.setValue(val)
+        self._status_label.setText(msg)
+        self.statusBar().showMessage(msg)
+
+    def _on_worker_finished(self, result: object) -> None:
+        """Handle completion of the analysis worker."""
+        self._open_btn.setEnabled(True)
+        self._start_btn.setEnabled(True)
+        self._progress_bar.setValue(100)
+        count = getattr(result, "timeline_event_count", 0)
+        done_msg = self.tr_.t("status.completed", count=count)
+        self._status_label.setText(done_msg)
+        self.statusBar().showMessage(done_msg)
+
+    def _on_worker_failed(self, err: str) -> None:
+        """Handle analysis failure."""
+        self._open_btn.setEnabled(True)
+        self._start_btn.setEnabled(True)
+        err_msg = self.tr_.t("status.error", error=err)
+        self._status_label.setText(err_msg)
+        self.statusBar().showMessage(err_msg)
 
 
 def run_gui(argv: list[str]) -> int:
