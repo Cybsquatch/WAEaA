@@ -1,0 +1,10 @@
+id: win.eventlogs
+name: Windows Event Logs
+description: Windows event logs (.evtx) recording system, security, application and audit events.
+category: EventLogs
+os: windows
+targets:
+  - path: '%SystemRoot%\System32\winevt\Logs'
+    mask: '*.evtx'
+    recursive: false
+    comment: Standard Windows Event Logs

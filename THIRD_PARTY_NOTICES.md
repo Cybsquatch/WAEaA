@@ -27,6 +27,7 @@ that introduces it.
 | Component | Version | License | Usage |
 |---|---|---|---|
 | Go standard library | 1.20 / latest | BSD-3-Clause | runtime |
+| gopkg.in/yaml.v3 | 3.0.1 | MIT / Apache-2.0 | YAML rule parsing |
 
 ### Ingestor (Python)
 

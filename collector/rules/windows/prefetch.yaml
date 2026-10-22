@@ -1,0 +1,10 @@
+id: win.prefetch
+name: Windows Prefetch Files
+description: Execution evidence and run metrics for binaries run on the host.
+category: Execution
+os: windows
+targets:
+  - path: '%SystemRoot%\Prefetch'
+    mask: '*.pf'
+    recursive: false
+    comment: Windows prefetch files

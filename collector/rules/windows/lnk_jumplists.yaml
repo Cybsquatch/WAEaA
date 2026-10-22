@@ -1,0 +1,18 @@
+id: win.lnk_jumplists
+name: Windows Shortcuts and Jump Lists
+description: LNK files, Shell link files, and Automatic/Custom Destination jump lists tracking accessed files.
+category: FileAccess
+os: windows
+targets:
+  - path: 'Users\*\AppData\Roaming\Microsoft\Windows\Recent'
+    mask: '*.lnk'
+    recursive: false
+    comment: Recent file shortcuts
+  - path: 'Users\*\AppData\Roaming\Microsoft\Windows\Recent\AutomaticDestinations'
+    mask: '*'
+    recursive: false
+    comment: Automatic Jump Lists
+  - path: 'Users\*\AppData\Roaming\Microsoft\Windows\Recent\CustomDestinations'
+    mask: '*'
+    recursive: false
+    comment: Custom Jump Lists

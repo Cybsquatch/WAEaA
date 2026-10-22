@@ -1,0 +1,10 @@
+id: win.amcache
+name: Windows Amcache and Shimcache Evidence
+description: Amcache hive containing program execution metadata, SHA1 hashes, and install traces.
+category: Execution
+os: windows
+targets:
+  - path: '%SystemRoot%\appcompat\Programs'
+    mask: 'Amcache.hve*'
+    raw_ntfs: true
+    comment: Amcache hive and transaction logs

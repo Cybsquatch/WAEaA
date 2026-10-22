@@ -1,0 +1,15 @@
+id: win.browser_history
+name: Web Browser History and Downloads
+description: History, download databases and session files for major web browsers (Chrome, Edge, Firefox).
+category: WebBrowsing
+os: windows
+targets:
+  - path: 'Users\*\AppData\Local\Google\Chrome\User Data\*'
+    mask: 'History*'
+    comment: Google Chrome history SQLite DB
+  - path: 'Users\*\AppData\Local\Microsoft\Edge\User Data\*'
+    mask: 'History*'
+    comment: Microsoft Edge history SQLite DB
+  - path: 'Users\*\AppData\Roaming\Mozilla\Firefox\Profiles\*'
+    mask: 'places.sqlite*'
+    comment: Mozilla Firefox places database

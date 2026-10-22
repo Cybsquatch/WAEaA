@@ -1,0 +1,34 @@
+id: win.registry
+name: Windows Registry Hives
+description: Core system and user registry hives, transaction logs and user-specific configurations.
+category: Registry
+os: windows
+targets:
+  - path: '%SystemRoot%\System32\config'
+    mask: 'SAM*'
+    raw_ntfs: true
+    comment: Security Account Manager hive and logs
+  - path: '%SystemRoot%\System32\config'
+    mask: 'SYSTEM*'
+    raw_ntfs: true
+    comment: System configuration hive and logs
+  - path: '%SystemRoot%\System32\config'
+    mask: 'SECURITY*'
+    raw_ntfs: true
+    comment: Security policy hive and logs
+  - path: '%SystemRoot%\System32\config'
+    mask: 'SOFTWARE*'
+    raw_ntfs: true
+    comment: Installed software hive and logs
+  - path: '%SystemRoot%\System32\config'
+    mask: 'DEFAULT*'
+    raw_ntfs: true
+    comment: Default profile hive and logs
+  - path: 'Users\*'
+    mask: 'NTUSER.DAT*'
+    raw_ntfs: true
+    comment: User-specific registry hives and transaction logs
+  - path: 'Users\*\AppData\Local\Microsoft\Windows'
+    mask: 'UsrClass.dat*'
+    raw_ntfs: true
+    comment: User ShellBags and Class registry hives

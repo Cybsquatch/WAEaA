@@ -1,0 +1,13 @@
+id: win.srum
+name: Windows System Resource Usage Monitor (SRUM)
+description: Records application network, CPU, energy and foreground activity history.
+category: SystemActivity
+os: windows
+targets:
+  - path: '%SystemRoot%\System32\sru'
+    mask: 'SRUDB.dat'
+    raw_ntfs: true
+    comment: SRUM ESE database
+  - path: '%SystemRoot%\System32\sru'
+    mask: '*.log'
+    comment: SRUM transaction logs

@@ -1,0 +1,10 @@
+id: win.powershell_history
+name: PowerShell Command History
+description: Command history logs captured by PSReadLine across user profiles.
+category: CommandExecution
+os: windows
+targets:
+  - path: 'Users\*\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine'
+    mask: 'ConsoleHost_history.txt'
+    recursive: false
+    comment: PowerShell console command history

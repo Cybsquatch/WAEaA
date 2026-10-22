@@ -1,0 +1,10 @@
+id: win.recycle_bin
+name: Windows Recycle Bin Metadata
+description: Deleted file metadata files ($I) and contents ($R) stored in the volume Recycle Bin.
+category: FileDeletion
+os: windows
+targets:
+  - path: '$Recycle.Bin'
+    mask: '$I*'
+    recursive: true
+    comment: Deleted item index records

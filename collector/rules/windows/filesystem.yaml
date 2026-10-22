@@ -1,0 +1,18 @@
+id: win.filesystem_mft
+name: NTFS File System Metadata ($MFT, $LogFile, $UsnJrnl)
+description: Master File Table ($MFT), transaction journal and USN change journal.
+category: FileSystem
+os: windows
+targets:
+  - path: '\'
+    mask: '$MFT'
+    raw_ntfs: true
+    comment: Master File Table
+  - path: '\'
+    mask: '$LogFile'
+    raw_ntfs: true
+    comment: NTFS Transaction Log File
+  - path: '$Extend'
+    mask: '$UsnJrnl:$J'
+    raw_ntfs: true
+    comment: NTFS USN Change Journal

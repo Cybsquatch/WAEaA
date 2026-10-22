@@ -1,0 +1,10 @@
+id: win.scheduled_tasks
+name: Windows Scheduled Tasks
+description: Task XML job definitions stored in the system tasks directory.
+category: Persistence
+os: windows
+targets:
+  - path: '%SystemRoot%\System32\Tasks'
+    mask: '*'
+    recursive: true
+    comment: Scheduled tasks XML files
