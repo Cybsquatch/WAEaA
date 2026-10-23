@@ -5,6 +5,7 @@ package gui
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -23,26 +24,31 @@ var (
 	gdi32    = syscall.NewLazyDLL("gdi32.dll")
 	shell32  = syscall.NewLazyDLL("shell32.dll")
 
-	procRegisterClassExW     = user32.NewProc("RegisterClassExW")
-	procCreateWindowExW      = user32.NewProc("CreateWindowExW")
-	procDefWindowProcW       = user32.NewProc("DefWindowProcW")
-	procDestroyWindow        = user32.NewProc("DestroyWindow")
-	procPostQuitMessage      = user32.NewProc("PostQuitMessage")
-	procShowWindow           = user32.NewProc("ShowWindow")
-	procUpdateWindow         = user32.NewProc("UpdateWindow")
-	procGetMessageW          = user32.NewProc("GetMessageW")
-	procTranslateMessage     = user32.NewProc("TranslateMessage")
-	procDispatchMessageW     = user32.NewProc("DispatchMessageW")
-	procSendMessageW         = user32.NewProc("SendMessageW")
-	procSetWindowTextW       = user32.NewProc("SetWindowTextW")
-	procGetWindowTextW       = user32.NewProc("GetWindowTextW")
-	procGetWindowTextLength  = user32.NewProc("GetWindowTextLengthW")
-	procEnableWindow         = user32.NewProc("EnableWindow")
-	procMessageBoxW          = user32.NewProc("MessageBoxW")
-	procGetStockObject       = gdi32.NewProc("GetStockObject")
-	procGetModuleHandleW     = kernel32.NewProc("GetModuleHandleW")
-	procSHBrowseForFolderW   = shell32.NewProc("SHBrowseForFolderW")
-	procSHGetPathFromIDListW = shell32.NewProc("SHGetPathFromIDListW")
+	procRegisterClassExW       = user32.NewProc("RegisterClassExW")
+	procCreateWindowExW        = user32.NewProc("CreateWindowExW")
+	procDefWindowProcW         = user32.NewProc("DefWindowProcW")
+	procDestroyWindow          = user32.NewProc("DestroyWindow")
+	procPostQuitMessage        = user32.NewProc("PostQuitMessage")
+	procShowWindow             = user32.NewProc("ShowWindow")
+	procUpdateWindow           = user32.NewProc("UpdateWindow")
+	procGetMessageW            = user32.NewProc("GetMessageW")
+	procTranslateMessage       = user32.NewProc("TranslateMessage")
+	procDispatchMessageW       = user32.NewProc("DispatchMessageW")
+	procSendMessageW           = user32.NewProc("SendMessageW")
+	procSetWindowTextW         = user32.NewProc("SetWindowTextW")
+	procGetWindowTextW         = user32.NewProc("GetWindowTextW")
+	procGetWindowTextLength    = user32.NewProc("GetWindowTextLengthW")
+	procEnableWindow           = user32.NewProc("EnableWindow")
+	procMessageBoxW            = user32.NewProc("MessageBoxW")
+	procLoadCursorW            = user32.NewProc("LoadCursorW")
+	procGetStockObject         = gdi32.NewProc("GetStockObject")
+	procGetModuleHandleW       = kernel32.NewProc("GetModuleHandleW")
+	procGetLogicalDriveStringsW = kernel32.NewProc("GetLogicalDriveStringsW")
+	procGetDriveTypeW          = kernel32.NewProc("GetDriveTypeW")
+	procGetVolumeInformationW  = kernel32.NewProc("GetVolumeInformationW")
+	procGetDiskFreeSpaceExW    = kernel32.NewProc("GetDiskFreeSpaceExW")
+	procSHBrowseForFolderW     = shell32.NewProc("SHBrowseForFolderW")
+	procSHGetPathFromIDListW   = shell32.NewProc("SHGetPathFromIDListW")
 )
 
 // Win32 Constants
@@ -68,6 +74,7 @@ const (
 	bstChecked = 1
 
 	wmDestroy      = 0x0002
+	wmClose        = 0x0010
 	wmCommand      = 0x0111
 	wmSetFont      = 0x0030
 	defaultGuiFont = 17 // DEFAULT_GUI_FONT
@@ -82,6 +89,7 @@ const (
 	idBtnBrowseOut = 102
 	idBtnStart     = 103
 	idChkAuth      = 104
+	idBtnSelectAllDrives = 105
 )
 
 type wndClassEx struct {
@@ -99,6 +107,17 @@ type wndClassEx struct {
 	IconSm     syscall.Handle
 }
 
+type winMsg struct {
+	Hwnd     syscall.Handle
+	Message  uint32
+	_pad1    uint32 // 4-byte padding for 64-bit alignment of WParam
+	WParam   uintptr
+	LParam   uintptr
+	Time     uint32
+	Pt       struct{ X, Y int32 }
+	LPrivate uint32
+}
+
 type browseInfo struct {
 	HwndOwner      syscall.Handle
 	PidlRoot       uintptr
@@ -108,6 +127,14 @@ type browseInfo struct {
 	Lpfn           uintptr
 	LParam         uintptr
 	IImage         int32
+}
+
+type DriveItem struct {
+	Letter     string // "C:\"
+	Label      string // "SSD Windows"
+	FileSystem string // "NTFS"
+	TotalGB    float64
+	Hwnd       syscall.Handle
 }
 
 type guiState struct {
@@ -126,6 +153,10 @@ type guiState struct {
 	hChkMD5    syscall.Handle
 	hChkSHA1   syscall.Handle
 
+	// Detected Drives
+	drives     []DriveItem
+	driveChecks map[string]syscall.Handle // Drive letter -> checkbox hwnd
+
 	// Rule checkboxes map rule ID -> hwnd
 	ruleChecks map[string]syscall.Handle
 	tr         *i18n.Translator
@@ -136,19 +167,28 @@ var state guiState
 
 // Run starts the native Windows GUI.
 func Run() int {
+	// Lock the OS thread: mandatory for Win32 GUI message loops in Go.
+	// Prevents the scheduler from migrating the goroutine to another OS thread,
+	// which causes GetMessage to hang and the window to show "(Not Responding)".
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	state.tr = i18n.MustNew(i18n.Detect())
 	state.ruleChecks = make(map[string]syscall.Handle)
+	state.driveChecks = make(map[string]syscall.Handle)
 
 	hInstance, _, _ := procGetModuleHandleW.Call(0)
 	className, _ := syscall.UTF16PtrFromString("WAEaA_Collector_Window")
 	title, _ := syscall.UTF16PtrFromString(fmt.Sprintf("%s - Forensic Triage %s", version.Name, version.Version))
+
+	hCursor, _, _ := procLoadCursorW.Call(0, 32512) // IDC_ARROW
 
 	wcex := wndClassEx{
 		Size:       uint32(unsafe.Sizeof(wndClassEx{})),
 		Style:      0x0003, // CS_HREDRAW | CS_VREDRAW
 		WndProc:    syscall.NewCallback(windowProc),
 		Instance:   syscall.Handle(hInstance),
-		Cursor:     0,
+		Cursor:     syscall.Handle(hCursor),
 		Background: 16, // COLOR_BTNFACE + 1
 		ClassName:  className,
 	}
@@ -160,7 +200,7 @@ func Run() int {
 		uintptr(unsafe.Pointer(className)),
 		uintptr(unsafe.Pointer(title)),
 		wsOverlappedWindow|wsVisible,
-		100, 100, 920, 720,
+		80, 60, 940, 780,
 		0, 0, hInstance, 0,
 	)
 
@@ -175,15 +215,7 @@ func Run() int {
 	procUpdateWindow.Call(hwnd)
 
 	// Windows Message Loop
-	var msg struct {
-		Hwnd    syscall.Handle
-		Message uint32
-		WParam  uintptr
-		LParam  uintptr
-		Time    uint32
-		Pt      struct{ X, Y int32 }
-	}
-
+	var msg winMsg
 	for {
 		r, _, _ := procGetMessageW.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
 		if r == 0 || int32(r) == -1 {
@@ -194,6 +226,70 @@ func Run() int {
 	}
 
 	return 0
+}
+
+func detectDrives() []DriveItem {
+	buf := make([]uint16, 512)
+	r, _, _ := procGetLogicalDriveStringsW.Call(uintptr(len(buf)), uintptr(unsafe.Pointer(&buf[0])))
+	if r == 0 {
+		return nil
+	}
+
+	var items []DriveItem
+	var current []uint16
+	for _, ch := range buf[:r] {
+		if ch == 0 {
+			if len(current) > 0 {
+				driveStr := syscall.UTF16ToString(current)
+				current = nil
+
+				drivePtr, _ := syscall.UTF16PtrFromString(driveStr)
+				dt, _, _ := procGetDriveTypeW.Call(uintptr(unsafe.Pointer(drivePtr)))
+				// Skip CD-ROM (5)
+				if dt == 5 {
+					continue
+				}
+
+				volNameBuf := make([]uint16, 260)
+				fsNameBuf := make([]uint16, 260)
+				var serial, maxComponentLen, flags uint32
+
+				procGetVolumeInformationW.Call(
+					uintptr(unsafe.Pointer(drivePtr)),
+					uintptr(unsafe.Pointer(&volNameBuf[0])),
+					uintptr(len(volNameBuf)),
+					uintptr(unsafe.Pointer(&serial)),
+					uintptr(unsafe.Pointer(&maxComponentLen)),
+					uintptr(unsafe.Pointer(&flags)),
+					uintptr(unsafe.Pointer(&fsNameBuf[0])),
+					uintptr(len(fsNameBuf)),
+				)
+
+				label := syscall.UTF16ToString(volNameBuf)
+				fs := syscall.UTF16ToString(fsNameBuf)
+
+				var freeBytes, totalBytes, totalFree uint64
+				procGetDiskFreeSpaceExW.Call(
+					uintptr(unsafe.Pointer(drivePtr)),
+					uintptr(unsafe.Pointer(&freeBytes)),
+					uintptr(unsafe.Pointer(&totalBytes)),
+					uintptr(unsafe.Pointer(&totalFree)),
+				)
+
+				totalGB := float64(totalBytes) / (1024 * 1024 * 1024)
+
+				items = append(items, DriveItem{
+					Letter:     driveStr,
+					Label:      label,
+					FileSystem: fs,
+					TotalGB:    totalGB,
+				})
+			}
+		} else {
+			current = append(current, ch)
+		}
+	}
+	return items
 }
 
 func buildControls(parent, hInstance syscall.Handle) {
@@ -219,21 +315,61 @@ func buildControls(parent, hInstance syscall.Handle) {
 	}
 
 	// 1. Source and Output Path Selection
-	createCtrl("BUTTON", " Acquisition Scope ", bsGroupBox, 15, 10, 875, 95, 0)
-	createCtrl("STATIC", "Source Volume:", 0, 30, 35, 120, 20, 0)
+	createCtrl("BUTTON", " Acquisition Scope & Target Drives ", bsGroupBox, 15, 8, 895, 145, 0)
+
+	// Drive Checkboxes
+	createCtrl("STATIC", "Select Drive(s) to acquire:", 0, 30, 28, 200, 18, 0)
+	createCtrl("BUTTON", "Select / Invert All", bsPushButton, 755, 24, 135, 22, idBtnSelectAllDrives)
+
+	state.drives = detectDrives()
 	sysDrive := os.Getenv("SystemDrive")
 	if sysDrive == "" {
 		sysDrive = "C:"
 	}
-	state.hSrcEdit = createCtrl("EDIT", sysDrive+`\`, wsBorder|esLeft, 150, 32, 600, 24, 0)
-	createCtrl("BUTTON", "Browse...", bsPushButton, 760, 32, 110, 24, idBtnBrowseSrc)
+	sysDrive = strings.ToUpper(strings.TrimRight(sysDrive, `\/`)) + `\`
 
-	createCtrl("STATIC", "Evidence Output:", 0, 30, 68, 120, 20, 0)
-	state.hOutEdit = createCtrl("EDIT", "", wsBorder|esLeft, 150, 65, 600, 24, 0)
-	createCtrl("BUTTON", "Browse...", bsPushButton, 760, 65, 110, 24, idBtnBrowseOut)
+	driveX := 30
+	driveY := 48
+	for i, d := range state.drives {
+		labelStr := d.Letter
+		if d.Label != "" {
+			labelStr += fmt.Sprintf(" [%s]", d.Label)
+		}
+		if d.FileSystem != "" {
+			labelStr += fmt.Sprintf(" (%s", d.FileSystem)
+			if d.TotalGB > 0 {
+				labelStr += fmt.Sprintf(", %.1f GB)", d.TotalGB)
+			} else {
+				labelStr += ")"
+			}
+		}
+
+		chk := createCtrl("BUTTON", labelStr, bsAutoCheckBox, driveX, driveY, 275, 22, 0)
+		// Check system drive by default
+		if strings.EqualFold(d.Letter, sysDrive) {
+			procSendMessageW.Call(uintptr(chk), bmSetCheck, bstChecked, 0)
+		}
+		state.driveChecks[d.Letter] = chk
+		state.drives[i].Hwnd = chk
+
+		driveX += 285
+		if (i+1)%3 == 0 {
+			driveX = 30
+			driveY += 24
+		}
+	}
+
+	// Optional Custom Path & Evidence Output
+	createCtrl("STATIC", "Or custom path:", 0, 30, 96, 110, 20, 0)
+	state.hSrcEdit = createCtrl("EDIT", "", wsBorder|esLeft, 145, 93, 620, 22, 0)
+	createCtrl("BUTTON", "Browse...", bsPushButton, 775, 92, 115, 23, idBtnBrowseSrc)
+
+	createCtrl("STATIC", "Evidence Output:", 0, 30, 122, 110, 20, 0)
+	state.hOutEdit = createCtrl("EDIT", "", wsBorder|esLeft, 145, 120, 620, 22, 0)
+	createCtrl("BUTTON", "Browse...", bsPushButton, 775, 119, 115, 23, idBtnBrowseOut)
 
 	// 2. Forensic Artefact Rules Group
-	createCtrl("BUTTON", " Artefact Rules Selection ", bsGroupBox, 15, 115, 530, 225, 0)
+	createCtrl("BUTTON", " Artefact Rules Selection ", bsGroupBox, 15, 160, 540, 215, 0)
 
 	// Add Checkboxes for Built-in Forensic Rules
 	ruleList := []struct{ id, label string }{
@@ -247,58 +383,58 @@ func buildControls(parent, hInstance syscall.Handle) {
 		{"win.scheduled_tasks", "Scheduled Tasks XML Definitions"},
 		{"win.powershell_history", "PowerShell Console History"},
 		{"win.recycle_bin", "Recycle Bin Records ($I*)"},
-		{"win.browser_history", "Browser History & Downloads (Chrome, Edge, Firefox)"},
+		{"win.browser_history", "Browser History (Chrome, Edge, Firefox)"},
 		{"win.filesystem_mft", "NTFS Metadata ($MFT, $LogFile, $UsnJrnl)"},
 	}
 
 	colX := 30
-	rowY := 140
+	rowY := 182
 	for i, r := range ruleList {
-		chk := createCtrl("BUTTON", r.label, bsAutoCheckBox, colX, rowY, 240, 22, 0)
+		chk := createCtrl("BUTTON", r.label, bsAutoCheckBox, colX, rowY, 250, 20, 0)
 		if r.id == "triage" {
 			procSendMessageW.Call(uintptr(chk), bmSetCheck, bstChecked, 0)
 		}
 		state.ruleChecks[r.id] = chk
-		rowY += 26
+		rowY += 24
 		if i == 5 {
-			colX = 285
-			rowY = 140
+			colX = 290
+			rowY = 182
 		}
 	}
 
 	// 3. Acquisition Options Group
-	createCtrl("BUTTON", " Forensic Options ", bsGroupBox, 560, 115, 330, 225, 0)
-	state.hChkVSS = createCtrl("BUTTON", "Process Volume Shadow Copies (VSS)", bsAutoCheckBox, 580, 140, 300, 22, 0)
-	state.hChkDedup = createCtrl("BUTTON", "De-duplication Enabled (SHA-1)", bsAutoCheckBox, 580, 170, 300, 22, 0)
+	createCtrl("BUTTON", " Forensic Options ", bsGroupBox, 570, 160, 340, 215, 0)
+	state.hChkVSS = createCtrl("BUTTON", "Process Volume Shadow Copies (VSS)", bsAutoCheckBox, 585, 185, 310, 22, 0)
+	state.hChkDedup = createCtrl("BUTTON", "De-duplication Enabled (SHA-1)", bsAutoCheckBox, 585, 215, 310, 22, 0)
 	procSendMessageW.Call(uintptr(state.hChkDedup), bmSetCheck, bstChecked, 0)
 
-	state.hChkMD5 = createCtrl("BUTTON", "Calculate MD5 hash", bsAutoCheckBox, 580, 200, 300, 22, 0)
-	state.hChkSHA1 = createCtrl("BUTTON", "Calculate SHA-1 hash", bsAutoCheckBox, 580, 230, 300, 22, 0)
+	state.hChkMD5 = createCtrl("BUTTON", "Calculate MD5 hash", bsAutoCheckBox, 585, 245, 310, 22, 0)
+	state.hChkSHA1 = createCtrl("BUTTON", "Calculate SHA-1 hash", bsAutoCheckBox, 585, 275, 310, 22, 0)
 
 	// 4. Chain of Custody & Authorisation
-	createCtrl("BUTTON", " Chain of Custody & Authorisation ", bsGroupBox, 15, 350, 875, 110, 0)
-	createCtrl("STATIC", "Case Identifier:", 0, 30, 375, 110, 20, 0)
-	state.hCaseEdit = createCtrl("EDIT", "", wsBorder|esLeft, 145, 372, 280, 24, 0)
+	createCtrl("BUTTON", " Chain of Custody & Authorisation ", bsGroupBox, 15, 382, 895, 110, 0)
+	createCtrl("STATIC", "Case Identifier:", 0, 30, 405, 110, 20, 0)
+	state.hCaseEdit = createCtrl("EDIT", "", wsBorder|esLeft, 145, 402, 280, 22, 0)
 
-	createCtrl("STATIC", "Examiner:", 0, 450, 375, 90, 20, 0)
-	state.hExamEdit = createCtrl("EDIT", "", wsBorder|esLeft, 545, 372, 325, 24, 0)
+	createCtrl("STATIC", "Examiner:", 0, 450, 405, 90, 20, 0)
+	state.hExamEdit = createCtrl("EDIT", "", wsBorder|esLeft, 545, 402, 345, 22, 0)
 
-	createCtrl("STATIC", "Notes / Scope:", 0, 30, 408, 110, 20, 0)
-	state.hNotesEdit = createCtrl("EDIT", "", wsBorder|esLeft, 145, 405, 725, 24, 0)
+	createCtrl("STATIC", "Notes / Scope:", 0, 30, 434, 110, 20, 0)
+	state.hNotesEdit = createCtrl("EDIT", "", wsBorder|esLeft, 145, 431, 745, 22, 0)
 
-	state.hChkAuth = createCtrl("BUTTON", "AUTHORISATION CONFIRMATION: I confirm explicit, lawful authorisation to collect forensic artefacts from this host.", bsAutoCheckBox, 30, 434, 840, 20, idChkAuth)
+	state.hChkAuth = createCtrl("BUTTON", "AUTHORISATION CONFIRMATION: I confirm explicit, lawful authorisation to collect forensic artefacts from this host.", bsAutoCheckBox, 30, 460, 860, 20, idChkAuth)
 
 	// 5. Execution Button
-	state.hBtnStart = createCtrl("BUTTON", "START FORENSIC ACQUISITION", bsPushButton, 15, 470, 875, 40, idBtnStart)
+	state.hBtnStart = createCtrl("BUTTON", "START FORENSIC ACQUISITION", bsPushButton, 15, 500, 895, 38, idBtnStart)
 
 	// 6. Live Log Output
-	createCtrl("STATIC", "Live Acquisition Log:", 0, 15, 520, 300, 18, 0)
-	state.hLogEdit = createCtrl("EDIT", "", wsBorder|esLeft|esMultiline|esAutoVScroll|esReadOnly|wsVScroll, 15, 540, 875, 125, 0)
+	createCtrl("STATIC", "Live Acquisition Log:", 0, 15, 545, 300, 18, 0)
+	state.hLogEdit = createCtrl("EDIT", "", wsBorder|esLeft|esMultiline|esAutoVScroll|esReadOnly|wsVScroll, 15, 565, 895, 160, 0)
 
-	appendLog("WAEaA Forensic Collector initialized. Administrative privileges active.\r\nSelect source, destination and rules, then confirm authorisation to start.")
+	appendLog("WAEaA Forensic Collector initialized. Administrative privileges active.\r\nDetected volumes ready for acquisition. Confirm authorisation and start.")
 }
 
-func windowProc(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr {
+func windowProc(hwnd syscall.Handle, msg uintptr, wParam, lParam uintptr) uintptr {
 	switch msg {
 	case wmCommand:
 		id := int(wParam & 0xFFFF)
@@ -307,17 +443,39 @@ func windowProc(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr
 			browseFolder(state.hwndMain, state.hSrcEdit, "Select Source Volume or Directory")
 		case idBtnBrowseOut:
 			browseFolder(state.hwndMain, state.hOutEdit, "Select Evidence Output Destination")
+		case idBtnSelectAllDrives:
+			toggleAllDrives()
 		case idBtnStart:
 			startAcquisition()
 		}
+		return 0
+	case wmClose:
+		procDestroyWindow.Call(uintptr(hwnd))
 		return 0
 	case wmDestroy:
 		procPostQuitMessage.Call(0)
 		return 0
 	}
 
-	r, _, _ := procDefWindowProcW.Call(uintptr(hwnd), uintptr(msg), wParam, lParam)
+	r, _, _ := procDefWindowProcW.Call(uintptr(hwnd), msg, wParam, lParam)
 	return r
+}
+
+func toggleAllDrives() {
+	allChecked := true
+	for _, chk := range state.driveChecks {
+		if !isChecked(chk) {
+			allChecked = false
+			break
+		}
+	}
+	targetState := bstChecked
+	if allChecked {
+		targetState = 0
+	}
+	for _, chk := range state.driveChecks {
+		procSendMessageW.Call(uintptr(chk), bmSetCheck, uintptr(targetState), 0)
+	}
 }
 
 func browseFolder(owner, hEdit syscall.Handle, title string) {
@@ -348,14 +506,34 @@ func startAcquisition() {
 		return
 	}
 
-	// Validation
-	outDir := getWindowText(state.hOutEdit)
-	if strings.TrimSpace(outDir) == "" {
+	// 1. Gather Selected Drive(s) and Custom Source
+	var selectedSources []string
+	for letter, chk := range state.driveChecks {
+		if isChecked(chk) {
+			selectedSources = append(selectedSources, letter)
+		}
+	}
+
+	customPath := strings.TrimSpace(getWindowText(state.hSrcEdit))
+	if customPath != "" {
+		selectedSources = append(selectedSources, customPath)
+	}
+
+	if len(selectedSources) == 0 {
 		state.mu.Unlock()
-		showMsg(state.hwndMain, "Validation Error", "Please specify an Evidence Output destination.")
+		showMsg(state.hwndMain, "Validation Error", "Please select at least one drive checkbox or specify a custom source path.")
 		return
 	}
 
+	// 2. Output Destination Validation
+	outDir := strings.TrimSpace(getWindowText(state.hOutEdit))
+	if outDir == "" {
+		state.mu.Unlock()
+		showMsg(state.hwndMain, "Validation Error", "Please specify an Evidence Output destination folder.")
+		return
+	}
+
+	// 3. Lawful Authorisation Confirmation
 	isAuth := isChecked(state.hChkAuth)
 	if !isAuth {
 		state.mu.Unlock()
@@ -363,6 +541,7 @@ func startAcquisition() {
 		return
 	}
 
+	// 4. Artefact Rules Selection
 	var selectedRules []string
 	for id, chk := range state.ruleChecks {
 		if isChecked(chk) {
@@ -380,7 +559,7 @@ func startAcquisition() {
 	state.mu.Unlock()
 
 	opts := cli.Options{
-		Source:     getWindowText(state.hSrcEdit),
+		Source:     strings.Join(selectedSources, ", "),
 		Output:     outDir,
 		Rules:      selectedRules,
 		VSS:        isChecked(state.hChkVSS),
@@ -400,10 +579,10 @@ func startAcquisition() {
 	}
 
 	appendLog("\r\n--- Starting Forensic Acquisition ---")
-	appendLog(fmt.Sprintf("Source: %s | Output: %s", opts.Source, opts.Output))
+	appendLog(fmt.Sprintf("Source(s): %s | Output: %s", opts.Source, opts.Output))
 	appendLog(fmt.Sprintf("Rules: %s", strings.Join(opts.Rules, ", ")))
 
-	// Run in background goroutine to keep UI responsive
+	// Run in background goroutine to keep Win32 UI responsive
 	go func() {
 		defer func() {
 			state.mu.Lock()

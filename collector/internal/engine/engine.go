@@ -25,6 +25,26 @@ import (
 	rulesfs "github.com/Cybsquatch/WAEaA/collector/rules"
 )
 
+func splitSources(source string) []string {
+	if strings.TrimSpace(source) == "" {
+		return []string{""}
+	}
+	raw := strings.FieldsFunc(source, func(r rune) bool {
+		return r == ',' || r == ';'
+	})
+	var out []string
+	for _, s := range raw {
+		clean := strings.TrimSpace(s)
+		if clean != "" {
+			out = append(out, clean)
+		}
+	}
+	if len(out) == 0 {
+		return []string{""}
+	}
+	return out
+}
+
 // Run executes the forensic acquisition workflow according to opts.
 func Run(opts *cli.Options, logger *logging.Logger, tr *i18n.Translator) error {
 	startTime := time.Now().UTC()
@@ -97,58 +117,63 @@ func Run(opts *cli.Options, logger *logging.Logger, tr *i18n.Translator) error {
 	wantMD5 := contains(opts.ExtraHashes, "md5")
 	wantSHA1 := contains(opts.ExtraHashes, "sha1")
 
-	// Process each target definition
-	for _, target := range targets {
-		logger.Debug("Evaluating target", "path", target.Path, "mask", target.Mask, "recursive", target.Recursive)
-		expandedPaths, err := ExpandPath(opts.Source, target.Path)
-		if err != nil {
-			logger.Trace("Path expansion error", "path", target.Path, "err", err)
-			continue
-		}
+	sources := splitSources(opts.Source)
+	logger.Info("Target sources configured", "sources", sources)
 
-		for _, basePath := range expandedPaths {
-			fi, err := os.Stat(basePath)
+	// Process each target definition across all requested sources
+	for _, src := range sources {
+		for _, target := range targets {
+			logger.Debug("Evaluating target", "source", src, "path", target.Path, "mask", target.Mask, "recursive", target.Recursive)
+			expandedPaths, err := ExpandPath(src, target.Path)
 			if err != nil {
-				logger.Trace("Target path not accessible", "path", basePath, "err", err)
+				logger.Trace("Path expansion error", "source", src, "path", target.Path, "err", err)
 				continue
 			}
 
-			if !fi.IsDir() {
-				// Single file target
-				if shouldCollectFile(basePath, fi, target, opts) {
-					collectFile(basePath, fi, target, opts, sink, manifest, dedupMap, &dedupCount, wantMD5, wantSHA1, logger)
-				}
-				continue
-			}
-
-			// Directory target
-			if target.Recursive {
-				_ = filepath.Walk(basePath, func(path string, info os.FileInfo, err error) error {
-					if err != nil || info.IsDir() {
-						return nil
-					}
-					if shouldCollectFile(path, info, target, opts) {
-						collectFile(path, info, target, opts, sink, manifest, dedupMap, &dedupCount, wantMD5, wantSHA1, logger)
-					}
-					return nil
-				})
-			} else {
-				entries, err := os.ReadDir(basePath)
+			for _, basePath := range expandedPaths {
+				fi, err := os.Stat(basePath)
 				if err != nil {
-					logger.Trace("Could not read directory", "dir", basePath, "err", err)
+					logger.Trace("Target path not accessible", "path", basePath, "err", err)
 					continue
 				}
-				for _, entry := range entries {
-					if entry.IsDir() {
-						continue
+
+				if !fi.IsDir() {
+					// Single file target
+					if shouldCollectFile(basePath, fi, target, opts) {
+						collectFile(basePath, fi, target, opts, sink, manifest, dedupMap, &dedupCount, wantMD5, wantSHA1, logger)
 					}
-					info, err := entry.Info()
+					continue
+				}
+
+				// Directory target
+				if target.Recursive {
+					_ = filepath.Walk(basePath, func(path string, info os.FileInfo, err error) error {
+						if err != nil || info.IsDir() {
+							return nil
+						}
+						if shouldCollectFile(path, info, target, opts) {
+							collectFile(path, info, target, opts, sink, manifest, dedupMap, &dedupCount, wantMD5, wantSHA1, logger)
+						}
+						return nil
+					})
+				} else {
+					entries, err := os.ReadDir(basePath)
 					if err != nil {
+						logger.Trace("Could not read directory", "dir", basePath, "err", err)
 						continue
 					}
-					path := filepath.Join(basePath, entry.Name())
-					if shouldCollectFile(path, info, target, opts) {
-						collectFile(path, info, target, opts, sink, manifest, dedupMap, &dedupCount, wantMD5, wantSHA1, logger)
+					for _, entry := range entries {
+						if entry.IsDir() {
+							continue
+						}
+						info, err := entry.Info()
+						if err != nil {
+							continue
+						}
+						path := filepath.Join(basePath, entry.Name())
+						if shouldCollectFile(path, info, target, opts) {
+							collectFile(path, info, target, opts, sink, manifest, dedupMap, &dedupCount, wantMD5, wantSHA1, logger)
+						}
 					}
 				}
 			}
@@ -157,13 +182,15 @@ func Run(opts *cli.Options, logger *logging.Logger, tr *i18n.Translator) error {
 
 	// Process Volume Shadow Copies if requested
 	if opts.VSS {
-		snapshots, err := vss.ListSnapshots(opts.Source)
-		if err != nil {
-			logger.Warn("Failed querying Volume Shadow Copies", "err", err)
-		} else {
-			logger.Info("Discovered Volume Shadow Copies", "count", len(snapshots))
+		for _, src := range sources {
+			snapshots, err := vss.ListSnapshots(src)
+			if err != nil {
+				logger.Warn("Failed querying Volume Shadow Copies", "source", src, "err", err)
+				continue
+			}
+			logger.Info("Discovered Volume Shadow Copies", "source", src, "count", len(snapshots))
 			for _, snap := range snapshots {
-				logger.Info("Processing Shadow Copy", "id", snap.ID, "device", snap.DeviceObject)
+				logger.Info("Processing Shadow Copy", "source", src, "id", snap.ID, "device", snap.DeviceObject)
 				vssSource := snap.DeviceObject + `\`
 				for _, target := range targets {
 					expandedPaths, err := ExpandPath(vssSource, target.Path)
