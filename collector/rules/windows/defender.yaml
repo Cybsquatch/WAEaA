@@ -1,0 +1,19 @@
+id: win.defender
+name: Windows Defender Detections and Quarantine
+description: Antivirus scan history, quarantine databases, and support logs.
+category: Antivirus
+os: windows
+targets:
+  - path: 'ProgramData\Microsoft\Windows Defender\Support'
+    mask: '*'
+    recursive: true
+    comment: Defender support logs and MPLog
+  - path: 'ProgramData\Microsoft\Windows Defender\Scans\History'
+    mask: '*'
+    recursive: true
+    comment: Scan results and detection history
+  - path: 'ProgramData\Microsoft\Windows Defender\Quarantine'
+    mask: '*'
+    recursive: true
+    raw_ntfs: true
+    comment: Quarantined malicious files and metadata

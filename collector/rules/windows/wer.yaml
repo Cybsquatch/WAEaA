@@ -1,0 +1,14 @@
+id: win.wer_crashdumps
+name: Windows Error Reporting (Crash Dumps)
+description: Process crash reports and mini-dumps highlighting exploited software or memory corruptions.
+category: Execution
+os: windows
+targets:
+  - path: 'ProgramData\Microsoft\Windows\WER\ReportArchive'
+    mask: '*.wer'
+    recursive: true
+    comment: Application crash reports
+  - path: '%SystemRoot%\Minidump'
+    mask: '*.dmp'
+    recursive: false
+    comment: System crash mini-dumps

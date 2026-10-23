@@ -1,18 +1,27 @@
 id: triage
 name: Standard Triage Collection
-description: Comprehensive standard incident response triage package collecting logs, registry, execution, tasks, command history, and shortcuts.
+description: Comprehensive incident response triage package capturing event logs, registry hives, filesystem metadata ($MFT), execution traces, persistence, network config, and memory artifacts.
 category: Compound
 os: windows
 compound: true
 rules:
   - win.eventlogs
   - win.registry
+  - win.filesystem_mft
   - win.prefetch
   - win.amcache
   - win.srum
   - win.lnk_jumplists
   - win.scheduled_tasks
+  - win.startup_folders
+  - win.wmi
   - win.powershell_history
   - win.recycle_bin
   - win.browser_history
   - win.rdp_cache
+  - win.network_config
+  - win.usb_devices
+  - win.defender
+  - win.bits_jobs
+  - win.firewall_logs
+  - win.wer_crashdumps

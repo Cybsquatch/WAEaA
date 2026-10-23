@@ -1,0 +1,10 @@
+id: win.wmi
+name: WMI Repository (Persistence & Events)
+description: WMI repository databases containing classes, instances, and event consumers.
+category: Persistence
+os: windows
+targets:
+  - path: '%SystemRoot%\System32\wbem\Repository'
+    mask: '*'
+    raw_ntfs: true
+    comment: WMI Repository (OBJECTS.DATA, INDEX.BTR, MAPPING*.MAP)

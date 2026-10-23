@@ -1,0 +1,10 @@
+id: win.firewall_logs
+name: Windows Firewall Logs
+description: Inbound and outbound dropped connection logs.
+category: Network
+os: windows
+targets:
+  - path: '%SystemRoot%\System32\LogFiles\Firewall'
+    mask: 'pfirewall.log*'
+    recursive: false
+    comment: Windows Firewall connection log

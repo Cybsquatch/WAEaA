@@ -1,0 +1,10 @@
+id: win.network_config
+name: Network Configuration and Hosts File
+description: Static DNS host mappings, network protocols, services, and routing files.
+category: Network
+os: windows
+targets:
+  - path: '%SystemRoot%\System32\drivers\etc'
+    mask: '*'
+    recursive: false
+    comment: Hosts file, services, networks, and protocols

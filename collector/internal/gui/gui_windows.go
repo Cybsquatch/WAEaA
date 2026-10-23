@@ -373,34 +373,39 @@ func buildControls(parent, hInstance syscall.Handle) {
 
 	// Add Checkboxes for Built-in Forensic Rules
 	ruleList := []struct{ id, label string }{
-		{"triage", "Standard Triage (Comprehensive IR Bundle)"},
+		{"triage", "Standard Triage (All Rules)"},
+		{"win.filesystem_mft", "NTFS Metadata ($MFT)"},
 		{"win.eventlogs", "Windows Event Logs (.evtx)"},
-		{"win.registry", "Registry Hives (System, SAM, Software, NTUSER)"},
-		{"win.prefetch", "Windows Prefetch Execution Evidence"},
-		{"win.amcache", "Amcache & Application Compatibility"},
-		{"win.srum", "System Resource Usage Monitor (SRUM)"},
-		{"win.lnk_jumplists", "Recent Shortcuts & JumpLists"},
-		{"win.scheduled_tasks", "Scheduled Tasks XML Definitions"},
-		{"win.powershell_history", "PowerShell Console History"},
-		{"win.recycle_bin", "Recycle Bin Records ($I*)"},
-		{"win.browser_history", "Browser History (Chrome, Edge, Firefox)"},
-		{"win.rdp_cache", "RDP Bitmap Cache (.bmc, .bin tiles)"},
-		{"win.filesystem_mft", "NTFS Metadata ($MFT, $LogFile, $UsnJrnl)"},
+		{"win.registry", "Registry Hives (All)"},
+		{"win.prefetch", "Windows Prefetch (.pf)"},
+		{"win.amcache", "Amcache & AppCompat"},
+		{"win.srum", "SRUM Activity Monitor"},
+		{"win.scheduled_tasks", "Scheduled Tasks XML"},
+		{"win.startup_folders", "Startup & Autoruns"},
+		{"win.wmi", "WMI Repository"},
+		{"win.powershell_history", "PowerShell History"},
+		{"win.recycle_bin", "Recycle Bin ($I / $R)"},
+		{"win.lnk_jumplists", "Shortcuts & JumpLists"},
+		{"win.browser_history", "Browser History (All)"},
+		{"win.rdp_cache", "RDP Bitmap Cache"},
+		{"win.network_config", "Network & Hosts Config"},
+		{"win.usb_devices", "USB History (SetupAPI)"},
+		{"win.defender", "Defender & Quarantine"},
+		{"win.bits_jobs", "BITS Job Queue"},
+		{"win.firewall_logs", "Firewall Logs"},
+		{"win.wer_crashdumps", "Crash Reports (WER)"},
 	}
 
-	colX := 30
-	rowY := 182
 	for i, r := range ruleList {
-		chk := createCtrl("BUTTON", r.label, bsAutoCheckBox, colX, rowY, 250, 20, 0)
+		col := i / 7
+		row := i % 7
+		colX := 25 + col*175
+		rowY := 182 + row*24
+		chk := createCtrl("BUTTON", r.label, bsAutoCheckBox, colX, rowY, 170, 20, 0)
 		if r.id == "triage" {
 			procSendMessageW.Call(uintptr(chk), bmSetCheck, bstChecked, 0)
 		}
 		state.ruleChecks[r.id] = chk
-		rowY += 24
-		if i == 6 {
-			colX = 290
-			rowY = 182
-		}
 	}
 
 	// 3. Acquisition Options Group

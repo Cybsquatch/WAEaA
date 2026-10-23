@@ -1,0 +1,10 @@
+id: win.bits_jobs
+name: Background Intelligent Transfer Service (BITS)
+description: BITS job queue files capturing persistent download cradles and C2 file transfers.
+category: Persistence
+os: windows
+targets:
+  - path: 'ProgramData\Microsoft\Network\Downloader'
+    mask: 'qmgr*.dat'
+    raw_ntfs: true
+    comment: BITS job queue databases

@@ -1,0 +1,14 @@
+id: win.startup_folders
+name: Startup Folders and Autoruns
+description: User and system Startup directories executing scripts, shortcuts, or binaries on user logon.
+category: Persistence
+os: windows
+targets:
+  - path: 'Users\*\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup'
+    mask: '*'
+    recursive: true
+    comment: User profile startup folder
+  - path: 'ProgramData\Microsoft\Windows\Start Menu\Programs\Startup'
+    mask: '*'
+    recursive: true
+    comment: All Users system startup folder

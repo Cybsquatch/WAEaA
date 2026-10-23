@@ -1,0 +1,14 @@
+id: win.usb_devices
+name: USB and Device Installation Logs (SetupAPI)
+description: Device installation logs recording first-insertion timestamps and serial numbers of USB storage devices.
+category: ExternalDevices
+os: windows
+targets:
+  - path: '%SystemRoot%\INF'
+    mask: 'setupapi.dev*.log'
+    recursive: false
+    comment: Device installation log
+  - path: '%SystemRoot%\INF'
+    mask: 'setupapi.setup*.log'
+    recursive: false
+    comment: Windows setup log
