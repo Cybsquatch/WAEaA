@@ -25,6 +25,7 @@ venv/
 .ruff_cache/
 .coverage
 htmlcov/
+/ingestor/build/
 /ingestor/build/output/
 
 # --- Test / runtime artefacts ---

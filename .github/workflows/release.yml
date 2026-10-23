@@ -47,6 +47,13 @@ jobs:
           $ver = $ver.TrimStart("v")
           .\scripts\build.ps1 -Version $ver
 
+      - name: Build Ingestor Application
+        shell: powershell
+        run: |
+          cd ingestor
+          python -m pip install -e ".[dev]"
+          pyinstaller --distpath ../dist/ingestor waeaa_ingestor.spec
+
       - name: Package Release Archives
         shell: powershell
         run: |

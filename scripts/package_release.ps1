@@ -18,18 +18,19 @@ $docs = @(
     (Join-Path $root "THIRD_PARTY_NOTICES.md")
 )
 
-function Package-Zip([string]$binName, [string]$zipName) {
-    $binPath = Join-Path $dist $binName
+function Package-Zip([string]$binRelativePath, [string]$zipName) {
+    $binPath = Join-Path $dist $binRelativePath
     if (-not (Test-Path $binPath)) {
-        Write-Warning "Binary not found: $binName"
+        Write-Warning "Binary not found: $binRelativePath"
         return
     }
     $targetZip = Join-Path $releaseDir $zipName
     if (Test-Path $targetZip) { Remove-Item $targetZip -Force }
 
-    $tempFolder = Join-Path $dist "tmp_$binName"
+    $baseName = [System.IO.Path]::GetFileName($binRelativePath)
+    $tempFolder = Join-Path $dist "tmp_$baseName"
     New-Item -ItemType Directory -Force -Path $tempFolder | Out-Null
-    Copy-Item $binPath -Destination (Join-Path $tempFolder $binName)
+    Copy-Item $binPath -Destination (Join-Path $tempFolder $baseName)
     foreach ($doc in $docs) {
         if (Test-Path $doc) { Copy-Item $doc -Destination $tempFolder }
     }
@@ -38,9 +39,33 @@ function Package-Zip([string]$binName, [string]$zipName) {
     Write-Host "Created $targetZip"
 }
 
+function Package-TarGz([string]$binRelativePath, [string]$tarName) {
+    $binPath = Join-Path $dist $binRelativePath
+    if (-not (Test-Path $binPath)) {
+        Write-Warning "Binary not found: $binRelativePath"
+        return
+    }
+    $targetTar = Join-Path $releaseDir $tarName
+    if (Test-Path $targetTar) { Remove-Item $targetTar -Force }
+
+    $baseName = [System.IO.Path]::GetFileName($binRelativePath)
+    $tempFolder = Join-Path $dist "tmp_$baseName"
+    New-Item -ItemType Directory -Force -Path $tempFolder | Out-Null
+    Copy-Item $binPath -Destination (Join-Path $tempFolder $baseName)
+    foreach ($doc in $docs) {
+        if (Test-Path $doc) { Copy-Item $doc -Destination $tempFolder }
+    }
+    & tar.exe -czf $targetTar -C $tempFolder .
+    Remove-Item $tempFolder -Recurse -Force
+    Write-Host "Created $targetTar"
+}
+
 Package-Zip "waeaa.exe" "waeaa-v$Version-windows-amd64.zip"
 Package-Zip "waeaa-legacy.exe" "waeaa-v$Version-windows-legacy-amd64.zip"
 Package-Zip "waeaa-legacy-x86.exe" "waeaa-v$Version-windows-legacy-x86.zip"
+Package-TarGz "waeaa-linux-amd64" "waeaa-v$Version-linux-amd64.tar.gz"
+Package-TarGz "waeaa-linux-arm64" "waeaa-v$Version-linux-arm64.tar.gz"
+Package-Zip "ingestor\waeaa-ingestor.exe" "waeaa-ingestor-v$Version-windows-amd64.zip"
 
 # Compute SHA256 checksums of release packages
 $checksums = @()
