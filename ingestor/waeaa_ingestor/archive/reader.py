@@ -116,11 +116,11 @@ class EvidenceArchive:
 
     def verify_file_hash(self, entry: ManifestEntry) -> bool:
         """Verify the cryptographic SHA-256 integrity of an archived file."""
-        if entry.deduplicated:
-            # Deduplicated files share content with original_archive_path
-            target_path = entry.original_archive_path or entry.archive_path
-        else:
-            target_path = entry.archive_path
+        target_path = (
+            entry.original_archive_path or entry.archive_path
+            if entry.deduplicated
+            else entry.archive_path
+        )
 
         if not target_path or target_path not in self._zip.namelist():
             return False

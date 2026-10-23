@@ -121,7 +121,8 @@ def test_rdp_cache_parser_and_reconstruction() -> None:
     from waeaa_ingestor.parsers.windows.rdp_cache import RdpCacheParser, ScreenReconstructor
 
     parser = RdpCacheParser()
-    assert parser.can_parse("Users/admin/AppData/Local/Microsoft/Terminal Server Client/Cache/bcache24.bmc") is True
+    sample_bmc = "Users/admin/AppData/Local/Microsoft/Terminal Server Client/Cache/bcache24.bmc"
+    assert parser.can_parse(sample_bmc) is True
     assert parser.can_parse("bcache.bin") is True
 
     # Synthetic 24bpp BMC: 32 bytes header + 12288 bytes (64x64x3) tile data

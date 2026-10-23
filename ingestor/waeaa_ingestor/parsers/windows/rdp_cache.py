@@ -7,7 +7,6 @@ into reconstructed desktop screenshot mosaics.
 
 from __future__ import annotations
 
-import io
 import math
 import struct
 from collections.abc import Iterator
@@ -267,10 +266,11 @@ class RdpCacheParser(BaseParser):
         idx = 0
         while offset + tile_size <= len(data):
             raw_tile = data[offset : offset + tile_size]
-            if is_24bpp:
-                bgra = self._convert_24bpp_to_32bpp(raw_tile)
-            else:
-                bgra = self._convert_16bpp_to_32bpp(raw_tile)
+            bgra = (
+                self._convert_24bpp_to_32bpp(raw_tile)
+                if is_24bpp
+                else self._convert_16bpp_to_32bpp(raw_tile)
+            )
 
             tiles.append(
                 RdpTile(
@@ -400,8 +400,10 @@ class ScreenReconstructor:
                 best_score = 999999.0
 
                 # Target edges to match
-                target_left = grid[r][c - 1].get_right_edge() if (c > 0 and grid[r][c - 1]) else None
-                target_top = grid[r - 1][c].get_bottom_edge() if (r > 0 and grid[r - 1][c]) else None
+                left_cell = grid[r][c - 1] if c > 0 else None
+                top_cell = grid[r - 1][c] if r > 0 else None
+                target_left = left_cell.get_right_edge() if left_cell is not None else None
+                target_top = top_cell.get_bottom_edge() if top_cell is not None else None
 
                 for candidate_idx, candidate in enumerate(tiles):
                     if candidate_idx in used:

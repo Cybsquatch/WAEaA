@@ -1,4 +1,4 @@
-"""Windows Scheduled Tasks XML definitions proprietary parser.
+r"""Windows Scheduled Tasks XML definitions proprietary parser.
 
 Parses tasks from %SystemRoot%\\System32\\Tasks, extracts action commands, arguments,
 authors, triggers, principals, and execution privileges for persistence investigation.
@@ -46,7 +46,7 @@ class TaskSchedulerParser(BaseParser):
             return
 
         try:
-            root = ET.fromstring(text)
+            root = ET.fromstring(text)  # noqa: S314
         except ET.ParseError:
             return
 

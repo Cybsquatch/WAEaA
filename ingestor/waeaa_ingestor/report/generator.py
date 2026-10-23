@@ -8,7 +8,6 @@ with zero external CDN dependencies.
 
 from __future__ import annotations
 
-import base64
 import html
 import json
 from dataclasses import dataclass, field
@@ -349,7 +348,7 @@ function toggleDetail(rowId) {
 function applyFindingsFilters() {
   const q = document.getElementById('search-findings').value.toLowerCase();
   const selectedTactic = document.getElementById('filter-findings-tactic').value;
-  
+
   const checkedSevs = Array.from(document.querySelectorAll('.chk-sev:checked')).map(cb => cb.value);
 
   const rows = document.querySelectorAll('#tbody-findings tr.data-row');
@@ -558,7 +557,6 @@ class HtmlReportGenerator:
         """Render complete HTML string."""
         crit_count = sum(1 for f in self.data.findings if f.severity.value == "Critical")
         high_count = sum(1 for f in self.data.findings if f.severity.value == "High")
-        med_count = sum(1 for f in self.data.findings if f.severity.value == "Medium")
         total_findings = len(self.data.findings)
         total_timeline = len(self.data.timeline_records)
 
@@ -686,13 +684,14 @@ class HtmlReportGenerator:
         for idx, f in enumerate(self.data.findings):
             sev_class = f.severity.value.lower()
             row_id = f"finding-{idx}"
-            tactic = f.mitre.tactic
+            tactic = f.mitre.tactic if f.mitre else "Unknown"
+            tech_id = f.mitre.technique_id if f.mitre else "N/A"
             out.append(f"            <tr id='{row_id}' class='data-row' data-sev='{f.severity.value}' data-tactic='{html.escape(tactic)}' onclick=\"toggleDetail('{row_id}-detail')\" style='cursor: pointer;'>")
-            out.append(f"              <td onclick='event.stopPropagation()'><input type='checkbox' class='row-cb' onchange=\"onRowChecked(this, 'table-findings')\"></td>")
+            out.append("              <td onclick='event.stopPropagation()'><input type='checkbox' class='row-cb' onchange=\"onRowChecked(this, 'table-findings')\"></td>")
             out.append(f"              <td><span class='badge badge-{sev_class}'>{f.severity.value}</span></td>")
             out.append(f"              <td><b>{html.escape(f.title)}</b><div style='font-size: 11px; color: var(--text-muted); margin-top: 2px;'>{html.escape(f.summary[:110])}</div></td>")
             out.append(f"              <td><code>{html.escape(f.timestamp_utc or 'N/A')}</code></td>")
-            out.append(f"              <td><span style='color: var(--accent-blue); font-weight: 600;'>{html.escape(f.mitre.technique_id)}</span> <span style='font-size: 11px; color: var(--text-muted);'>({html.escape(f.mitre.tactic)})</span></td>")
+            out.append(f"              <td><span style='color: var(--accent-blue); font-weight: 600;'>{html.escape(tech_id)}</span> <span style='font-size: 11px; color: var(--text-muted);'>({html.escape(tactic)})</span></td>")
             out.append(f"              <td><code>{html.escape(f.source_artefact)}</code></td>")
             out.append("            </tr>")
             # Detail expandable row
@@ -711,7 +710,7 @@ class HtmlReportGenerator:
         out.append("      <div class='mitre-grid'>")
         tactic_map: dict[str, list[Finding]] = {}
         for f in self.data.findings:
-            t = f.mitre.tactic or "Unknown"
+            t = (f.mitre.tactic if f.mitre else None) or "Unknown"
             tactic_map.setdefault(t, []).append(f)
 
         ordered_tactics = [
@@ -736,14 +735,16 @@ class HtmlReportGenerator:
             else:
                 seen_techs = set()
                 for f in findings_for_tactic:
-                    tech_key = f"{f.mitre.technique_id}:{f.mitre.technique_name}"
+                    t_id = f.mitre.technique_id if f.mitre else "N/A"
+                    t_name = f.mitre.technique_name if f.mitre else "N/A"
+                    tech_key = f"{t_id}:{t_name}"
                     if tech_key in seen_techs:
                         continue
                     seen_techs.add(tech_key)
                     c_class = "crit" if f.severity.value == "Critical" else ("high" if f.severity.value == "High" else "")
                     out.append(f"          <div class='mitre-card {c_class}' onclick=\"filterByMitreTactic('{tactic}')\" title='Click to filter findings'>")
-                    out.append(f"            <div class='tech-id'>{html.escape(f.mitre.technique_id)}</div>")
-                    out.append(f"            <div class='tech-name'>{html.escape(f.mitre.technique_name)}</div>")
+                    out.append(f"            <div class='tech-id'>{html.escape(t_id)}</div>")
+                    out.append(f"            <div class='tech-name'>{html.escape(t_name)}</div>")
                     out.append("          </div>")
             out.append("        </div>")
         out.append("      </div>")
@@ -789,7 +790,7 @@ class HtmlReportGenerator:
         for idx, r in enumerate(self.data.timeline_records[:timeline_display_limit]):
             row_id = f"tl-{idx}"
             out.append(f"            <tr id='{row_id}' class='data-row' data-type='{html.escape(r.artefact_type)}'>")
-            out.append(f"              <td><input type='checkbox' class='row-cb' onchange=\"onRowChecked(this, 'table-timeline')\"></td>")
+            out.append("              <td><input type='checkbox' class='row-cb' onchange=\"onRowChecked(this, 'table-timeline')\"></td>")
             out.append(f"              <td><code>{html.escape(r.timestamp_utc or 'N/A')}</code></td>")
             out.append(f"              <td><span class='badge badge-medium'>{html.escape(r.artefact_type)}</span></td>")
             out.append(f"              <td><b>{html.escape(r.action)}</b></td>")

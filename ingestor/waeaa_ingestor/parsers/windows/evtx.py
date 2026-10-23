@@ -106,7 +106,7 @@ def _decode_binxml_val(v_type: int, v_size: int, vb: bytes) -> Any:
             return f"0x{struct.unpack_from('<I', vb)[0]:x}"
         elif v_type == 0x15 and len(vb) >= 8:  # Hex64
             return f"0x{struct.unpack_from('<Q', vb)[0]:x}"
-    except Exception:
+    except (ValueError, struct.error, OSError, UnicodeDecodeError):
         pass
 
     # Heuristic fallback for strings
@@ -314,7 +314,7 @@ class EvtxParser(BaseParser):
                             user_sid = val
 
                 # EventData / UserData: usually in sys_vals[17] (0x21) or any value with vt == 0x21
-                for idx, (vt, vs, vb) in enumerate(sys_vals):
+                for idx, (vt, _vs, vb) in enumerate(sys_vals):
                     if vt == 0x21 and len(vb) >= 10:
                         # Offset in chunk of this value
                         val_chunk_offset = (
@@ -394,15 +394,14 @@ class EvtxParser(BaseParser):
         ]
         for k in candidate_ip_keys:
             val = str(event_data.get(k, "")).strip()
-            if val and val not in ("-", "::1", "127.0.0.1", "0.0.0.0"):
-                if IPV4_PATTERN.match(val):
-                    ip_address = val
-                    break
+            if val and val not in ("-", "::1", "127.0.0.1", "0.0.0.0") and IPV4_PATTERN.match(val):  # noqa: S104
+                ip_address = val
+                break
 
         if not ip_address:
             # Fallback scan across all string tokens
             for s in all_strings:
-                if s not in ("-", "::1", "127.0.0.1", "0.0.0.0"):
+                if s not in ("-", "::1", "127.0.0.1", "0.0.0.0"):  # noqa: S104
                     match = IPV4_PATTERN.search(s)
                     if match:
                         cand = match.group(0)
@@ -427,11 +426,14 @@ class EvtxParser(BaseParser):
         ]
         for k in candidate_user_keys:
             val = str(event_data.get(k, "")).strip()
-            if val and val not in ("-", "ANONYMOUS LOGON", "SYSTEM", "LOCAL SERVICE", "NETWORK SERVICE"):
-                # Avoid GUID or raw SID strings
-                if not val.startswith("S-1-") and not (len(val) == 36 and "-" in val):
-                    user = val
-                    break
+            if (
+                val
+                and val not in ("-", "ANONYMOUS LOGON", "SYSTEM", "LOCAL SERVICE", "NETWORK SERVICE")
+                and not val.startswith("S-1-")
+                and not (len(val) == 36 and "-" in val)
+            ):
+                user = val
+                break
 
         if not user:
             # Check for SYSTEM or machine accounts if no human user found

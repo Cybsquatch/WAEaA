@@ -9,6 +9,7 @@ import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from waeaa_ingestor.archive.reader import EvidenceArchive
 from waeaa_ingestor.detection.engine import DetectionEngine
@@ -134,9 +135,9 @@ class IngestionPipeline:
                 rdp_dir.mkdir(exist_ok=True)
 
                 # Save individual tiles as BMP
-                for t in all_rdp_tiles:
-                    tile_path = rdp_dir / f"tile_{t.index:05d}.bmp"
-                    tile_path.write_bytes(t.to_bmp())
+                for tile_item in all_rdp_tiles:
+                    tile_path = rdp_dir / f"tile_{tile_item.index:05d}.bmp"
+                    tile_path.write_bytes(tile_item.to_bmp())
 
                 # Assemble screen reconstructions
                 matched_screen = ScreenReconstructor.build_matched_screenshot(all_rdp_tiles)

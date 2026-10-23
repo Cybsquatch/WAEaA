@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import io
-import struct
-
 from waeaa_ingestor.detection.models import Severity
 from waeaa_ingestor.detection.rules import (
     FailedLogonRule,
@@ -14,7 +11,6 @@ from waeaa_ingestor.detection.rules import (
     RemoteLogonRule,
     UserAccountCreatedRule,
 )
-from waeaa_ingestor.parsers.base import ParsedRecord
 from waeaa_ingestor.parsers.windows.evtx import EvtxParser, filetime_to_iso
 
 

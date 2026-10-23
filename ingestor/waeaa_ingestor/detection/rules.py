@@ -260,9 +260,7 @@ class RemoteLogonRule(BaseRule):
 
         if is_external_ip and is_admin_user:
             sev = Severity.CRITICAL
-        elif is_external_ip:
-            sev = Severity.HIGH
-        elif is_admin_user:
+        elif is_external_ip or is_admin_user:
             sev = Severity.HIGH
         else:
             sev = Severity.MEDIUM

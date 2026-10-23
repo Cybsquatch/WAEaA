@@ -24,31 +24,31 @@ var (
 	gdi32    = syscall.NewLazyDLL("gdi32.dll")
 	shell32  = syscall.NewLazyDLL("shell32.dll")
 
-	procRegisterClassExW       = user32.NewProc("RegisterClassExW")
-	procCreateWindowExW        = user32.NewProc("CreateWindowExW")
-	procDefWindowProcW         = user32.NewProc("DefWindowProcW")
-	procDestroyWindow          = user32.NewProc("DestroyWindow")
-	procPostQuitMessage        = user32.NewProc("PostQuitMessage")
-	procShowWindow             = user32.NewProc("ShowWindow")
-	procUpdateWindow           = user32.NewProc("UpdateWindow")
-	procGetMessageW            = user32.NewProc("GetMessageW")
-	procTranslateMessage       = user32.NewProc("TranslateMessage")
-	procDispatchMessageW       = user32.NewProc("DispatchMessageW")
-	procSendMessageW           = user32.NewProc("SendMessageW")
-	procSetWindowTextW         = user32.NewProc("SetWindowTextW")
-	procGetWindowTextW         = user32.NewProc("GetWindowTextW")
-	procGetWindowTextLength    = user32.NewProc("GetWindowTextLengthW")
-	procEnableWindow           = user32.NewProc("EnableWindow")
-	procMessageBoxW            = user32.NewProc("MessageBoxW")
-	procLoadCursorW            = user32.NewProc("LoadCursorW")
-	procGetStockObject         = gdi32.NewProc("GetStockObject")
-	procGetModuleHandleW       = kernel32.NewProc("GetModuleHandleW")
+	procRegisterClassExW        = user32.NewProc("RegisterClassExW")
+	procCreateWindowExW         = user32.NewProc("CreateWindowExW")
+	procDefWindowProcW          = user32.NewProc("DefWindowProcW")
+	procDestroyWindow           = user32.NewProc("DestroyWindow")
+	procPostQuitMessage         = user32.NewProc("PostQuitMessage")
+	procShowWindow              = user32.NewProc("ShowWindow")
+	procUpdateWindow            = user32.NewProc("UpdateWindow")
+	procGetMessageW             = user32.NewProc("GetMessageW")
+	procTranslateMessage        = user32.NewProc("TranslateMessage")
+	procDispatchMessageW        = user32.NewProc("DispatchMessageW")
+	procSendMessageW            = user32.NewProc("SendMessageW")
+	procSetWindowTextW          = user32.NewProc("SetWindowTextW")
+	procGetWindowTextW          = user32.NewProc("GetWindowTextW")
+	procGetWindowTextLength     = user32.NewProc("GetWindowTextLengthW")
+	procEnableWindow            = user32.NewProc("EnableWindow")
+	procMessageBoxW             = user32.NewProc("MessageBoxW")
+	procLoadCursorW             = user32.NewProc("LoadCursorW")
+	procGetStockObject          = gdi32.NewProc("GetStockObject")
+	procGetModuleHandleW        = kernel32.NewProc("GetModuleHandleW")
 	procGetLogicalDriveStringsW = kernel32.NewProc("GetLogicalDriveStringsW")
-	procGetDriveTypeW          = kernel32.NewProc("GetDriveTypeW")
-	procGetVolumeInformationW  = kernel32.NewProc("GetVolumeInformationW")
-	procGetDiskFreeSpaceExW    = kernel32.NewProc("GetDiskFreeSpaceExW")
-	procSHBrowseForFolderW     = shell32.NewProc("SHBrowseForFolderW")
-	procSHGetPathFromIDListW   = shell32.NewProc("SHGetPathFromIDListW")
+	procGetDriveTypeW           = kernel32.NewProc("GetDriveTypeW")
+	procGetVolumeInformationW   = kernel32.NewProc("GetVolumeInformationW")
+	procGetDiskFreeSpaceExW     = kernel32.NewProc("GetDiskFreeSpaceExW")
+	procSHBrowseForFolderW      = shell32.NewProc("SHBrowseForFolderW")
+	procSHGetPathFromIDListW    = shell32.NewProc("SHGetPathFromIDListW")
 )
 
 // Win32 Constants
@@ -85,10 +85,10 @@ const (
 
 // Control IDs
 const (
-	idBtnBrowseSrc = 101
-	idBtnBrowseOut = 102
-	idBtnStart     = 103
-	idChkAuth      = 104
+	idBtnBrowseSrc       = 101
+	idBtnBrowseOut       = 102
+	idBtnStart           = 103
+	idChkAuth            = 104
 	idBtnSelectAllDrives = 105
 )
 
@@ -154,7 +154,7 @@ type guiState struct {
 	hChkSHA1   syscall.Handle
 
 	// Detected Drives
-	drives     []DriveItem
+	drives      []DriveItem
 	driveChecks map[string]syscall.Handle // Drive letter -> checkbox hwnd
 
 	// Rule checkboxes map rule ID -> hwnd
