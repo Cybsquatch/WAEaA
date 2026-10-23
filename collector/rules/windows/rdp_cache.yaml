@@ -1,0 +1,14 @@
+id: win.rdp_cache
+name: Windows Remote Desktop (RDP) Bitmap Cache
+description: RDP client bitmap cache files (.bmc / .bin) containing cached remote desktop screen tiles.
+category: RemoteAccess
+os: windows
+targets:
+  - path: '%SystemDrive%\Users\*\AppData\Local\Microsoft\Terminal Server Client\Cache'
+    mask: '*.bin'
+    recursive: false
+    comment: RDP 8+ bitmap cache files
+  - path: '%SystemDrive%\Users\*\AppData\Local\Microsoft\Terminal Server Client\Cache'
+    mask: '*.bmc'
+    recursive: false
+    comment: Legacy RDP bitmap cache files

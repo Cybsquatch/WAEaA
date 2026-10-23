@@ -115,3 +115,60 @@ def test_lnk_parser_synthetic() -> None:
     assert len(records) == 1
     assert records[0].artefact_type == "LNK"
     assert "C:\\Windows\\cmd.exe" in records[0].details["target_path"]
+
+
+def test_rdp_cache_parser_and_reconstruction() -> None:
+    from waeaa_ingestor.parsers.windows.rdp_cache import RdpCacheParser, ScreenReconstructor
+
+    parser = RdpCacheParser()
+    assert parser.can_parse("Users/admin/AppData/Local/Microsoft/Terminal Server Client/Cache/bcache24.bmc") is True
+    assert parser.can_parse("bcache.bin") is True
+
+    # Synthetic 24bpp BMC: 32 bytes header + 12288 bytes (64x64x3) tile data
+    tile_data = b"\x00\xFF\x00" * (64 * 64)  # Solid green
+    bmc_payload = b"\x00" * 32 + tile_data
+    records = list(parser.parse(io.BytesIO(bmc_payload), "bcache24.bmc"))
+    assert len(records) == 1
+    assert records[0].artefact_type == "RDPCache"
+    assert records[0].details["tile_count"] == 1
+
+    tiles = parser.extract_tiles(bmc_payload, "bcache24.bmc")
+    assert len(tiles) == 1
+    bmp = tiles[0].to_bmp()
+    assert bmp.startswith(b"BM")
+
+    # Test screen reconstruction
+    grid = ScreenReconstructor.build_grid_mosaic(tiles)
+    assert grid.bmp_bytes.startswith(b"BM")
+    assert grid.tile_count == 1
+
+    matched = ScreenReconstructor.build_matched_screenshot(tiles)
+    assert matched.bmp_bytes.startswith(b"BM")
+
+
+def test_task_scheduler_parser() -> None:
+    from waeaa_ingestor.parsers.windows.tasks import TaskSchedulerParser
+
+    parser = TaskSchedulerParser()
+    assert parser.can_parse("Windows/System32/Tasks/BackupTask") is True
+
+    task_xml = """<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Date>2024-02-06T21:49:21Z</Date>
+    <Author>BRANCHOFFICE\\admin</Author>
+    <URI>\\Enterpries backup</URI>
+  </RegistrationInfo>
+  <Actions Context="Author">
+    <Exec>
+      <Command>C:\\Tools\\PsExec.exe</Command>
+      <Arguments>-accept-eula \\\\Desktop-001 -c C:\\rename.exe</Arguments>
+    </Exec>
+  </Actions>
+</Task>""".encode("utf-16le")
+
+    records = list(parser.parse(io.BytesIO(task_xml), "Windows/System32/Tasks/Enterpries backup"))
+    assert len(records) == 1
+    assert records[0].artefact_type == "ScheduledTask"
+    assert records[0].details["task_name"] == "Enterpries backup"
+    assert "PsExec.exe" in records[0].details["command"]

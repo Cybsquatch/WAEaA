@@ -2,7 +2,8 @@
 
 Evaluates parsed records against MITRE ATT&CK categorized indicators:
 credential dumping, execution of LOLBins, persistence, anti-forensics,
-RDP intrusion, ransomware indicators, and Linux-specific exploit patterns.
+RDP intrusion, lateral movement, ransomware deployment, defender malware alerts,
+and Linux-specific exploit patterns.
 """
 
 from __future__ import annotations
@@ -61,26 +62,28 @@ class LogClearingRule(BaseRule):
         event_id = record.details.get("event_id")
         action = record.action
         if event_id in (1102, 104) or action == "AuditLogCleared":
+            provider = record.details.get("provider", "System")
+            channel = record.details.get("channel", "")
             return Finding(
-                finding_id=f"{self.rule_id}-{record.source_file}-{record.timestamp_utc}",
+                finding_id=f"{self.rule_id}-{record.source_file}-{record.timestamp_utc}-{event_id}",
                 rule_id=self.rule_id,
-                title=self.title,
+                title=f"Event Log Cleared ({channel or provider})",
                 severity=self.severity,
                 description=self.description,
                 timestamp_utc=record.timestamp_utc,
                 source_artefact=record.source_file,
-                summary=record.summary,
+                summary=f"Event log cleared: Event ID {event_id} ({provider}) on {channel}",
                 mitre=self.mitre,
                 details=record.details,
             )
         return None
 
 
-class RdpActivityRule(BaseRule):
-    """Detects Remote Desktop (RDP) authentication, session logon, and incoming connections."""
+class RdpIntrusionRule(BaseRule):
+    """Detects incoming Remote Desktop (RDP) logons, sessions, and external connections."""
 
     rule_id = "waeaa.rdp.connection"
-    title = "Remote Desktop (RDP) Session or Authentication"
+    title = "Remote Desktop (RDP) Inbound Authentication or Session"
     severity = Severity.HIGH
     mitre = MitreAttack(
         tactic="Initial Access",
@@ -88,8 +91,8 @@ class RdpActivityRule(BaseRule):
         technique_name="Valid Accounts: Domain Accounts",
     )
     description = (
-        "Remote Desktop session connection, reconnection, or successful authentication detected. "
-        "Adversaries utilize exposed RDP services for initial access, interactive staging, or lateral movement."
+        "Inbound Remote Desktop authentication (Event 1149) or session reconnection/logon "
+        "(Event 21, 24, 25) detected. Threat actors leverage exposed RDP services for initial access."
     )
 
     def evaluate(self, record: ParsedRecord) -> Finding | None:
@@ -101,20 +104,219 @@ class RdpActivityRule(BaseRule):
         channel = str(record.details.get("channel", "")).lower()
         provider = str(record.details.get("provider", "")).lower()
 
-        is_rdp_channel = "terminalservices" in channel or "rdp" in channel or "terminalservices" in provider
-        is_rdp_event = event_id in (1149, 21, 22, 24, 25)
+        is_rdp = "terminalservices" in channel or "rdp" in channel or "terminalservices" in provider
+        if not is_rdp:
+            return None
 
-        if is_rdp_channel and is_rdp_event:
+        if event_id == 1149:
+            user = record.details.get("param_4", record.user or "Unknown")
+            src_ip = record.details.get("param_5", "Unknown")
             return Finding(
-                finding_id=f"{self.rule_id}-{record.source_file}-{record.timestamp_utc}",
+                finding_id=f"{self.rule_id}-1149-{record.timestamp_utc}-{src_ip}",
                 rule_id=self.rule_id,
-                title=self.title,
-                severity=self.severity,
-                description=self.description,
+                title="RDP Authentication Succeeded (Event 1149)",
+                severity=Severity.CRITICAL if (src_ip and not src_ip.startswith(("10.", "192.168.", "172.16."))) else Severity.HIGH,
+                description=f"Successful RDP user authentication for account '{user}' from IP address {src_ip}.",
                 timestamp_utc=record.timestamp_utc,
                 source_artefact=record.source_file,
-                summary=record.summary,
+                summary=f"RDP Logon: User '{user}' authenticated from source IP {src_ip}",
                 mitre=self.mitre,
+                details=record.details,
+            )
+        elif event_id in (21, 25):
+            action_desc = "Session Logon" if event_id == 21 else "Session Reconnected"
+            return Finding(
+                finding_id=f"{self.rule_id}-{event_id}-{record.timestamp_utc}",
+                rule_id=self.rule_id,
+                title=f"RDP {action_desc} (Event {event_id})",
+                severity=Severity.MEDIUM,
+                description=f"Terminal Services {action_desc} recorded for user session.",
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary=f"RDP {action_desc} (Event ID {event_id})",
+                mitre=self.mitre,
+                details=record.details,
+            )
+        return None
+
+
+class SmbAdminShareLateralMovementRule(BaseRule):
+    """Detects outbound or inbound SMB Admin Share access (ADMIN$, C$, IPC$) for lateral movement."""
+
+    rule_id = "waeaa.lateral_movement.smb_admin_share"
+    title = "SMB Administrative Share Lateral Movement"
+    severity = Severity.CRITICAL
+    mitre = MitreAttack(
+        tactic="Lateral Movement",
+        technique_id="T1021.002",
+        technique_name="Remote Services: SMB/Windows Admin Shares",
+    )
+    description = (
+        "Access to administrative network shares (ADMIN$, C$, IPC$) identified. "
+        "Threat actors use administrative shares to stage payloads, execute remote services, and propagate ransomware."
+    )
+
+    ADMIN_SHARE_PATTERN = re.compile(r"\\([a-zA-Z0-9_\-\.]+)\\(admin\$|c\$|ipc\$)", re.IGNORECASE)
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for admin share access in SMB client events or security logs."""
+        text = get_record_full_text(record)
+        match = self.ADMIN_SHARE_PATTERN.search(text)
+        if match:
+            target_host = match.group(1)
+            share_name = match.group(2).upper()
+            return Finding(
+                finding_id=f"{self.rule_id}-{target_host}-{share_name}-{record.timestamp_utc}",
+                rule_id=self.rule_id,
+                title=f"Lateral Movement to \\\\{target_host}\\{share_name}",
+                severity=self.severity,
+                description=f"Connection or access established to administrative share \\\\{target_host}\\{share_name}.",
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary=f"Admin Share Access: \\\\{target_host}\\{share_name}",
+                mitre=self.mitre,
+                details=record.details,
+            )
+        return None
+
+
+class PsExecRansomwareDeploymentRule(BaseRule):
+    """Detects PsExec execution, hardcoded credentials, and ransomware staging in tasks or commands."""
+
+    rule_id = "waeaa.ransomware.psexec_deployment"
+    title = "PsExec Remote Execution / Ransomware Staging"
+    severity = Severity.CRITICAL
+    mitre = MitreAttack(
+        tactic="Lateral Movement",
+        technique_id="T1570",
+        technique_name="Lateral Tool Transfer",
+    )
+    description = (
+        "PsExec remote execution command identified targeting multiple network endpoints with "
+        "credentials or executing suspicious staging binaries (e.g. rename.exe, petya)."
+    )
+
+    PSEXEC_PATTERN = re.compile(r"(psexec(\.exe)?|-accept-eula|rename\.exe)", re.IGNORECASE)
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for PsExec and ransomware command lines."""
+        text = get_record_full_text(record)
+        if self.PSEXEC_PATTERN.search(text):
+            return Finding(
+                finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+                rule_id=self.rule_id,
+                title="PsExec Remote Command / Ransomware Deployment",
+                severity=self.severity,
+                description=(
+                    "PsExec remote command execution identified with arguments indicative of "
+                    "mass lateral propagation or ransomware staging."
+                ),
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary=f"PsExec Deployment: {record.summary[:100]}",
+                mitre=self.mitre,
+                details=record.details,
+            )
+        return None
+
+
+class SuspiciousScheduledTaskRule(BaseRule):
+    """Detects persistence installed via non-standard or malicious scheduled tasks."""
+
+    rule_id = "waeaa.persistence.scheduled_task"
+    title = "Suspicious Scheduled Task Persistence"
+    severity = Severity.HIGH
+    mitre = MitreAttack(
+        tactic="Persistence",
+        technique_id="T1053.005",
+        technique_name="Scheduled Task/Job: Scheduled Task",
+    )
+    description = (
+        "Scheduled task configured to execute utilities from Downloads, Desktop, Temp, "
+        "or non-standard administrative tools with elevated privileges."
+    )
+
+    SUSP_LOCATIONS = re.compile(
+        r"(\\users\\.*\\(downloads|desktop|temp|appdata)|psexec|powershell.*-w\s+hidden|cscript|wscript)",
+        re.IGNORECASE,
+    )
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check scheduled tasks for suspicious paths or commands."""
+        if record.artefact_type != "ScheduledTask":
+            return None
+
+        cmd = str(record.details.get("command", ""))
+        name = str(record.details.get("task_name", ""))
+        full_text = f"{name} {cmd}"
+
+        if self.SUSP_LOCATIONS.search(full_text):
+            return Finding(
+                finding_id=f"{self.rule_id}-{name}-{record.timestamp_utc}",
+                rule_id=self.rule_id,
+                title=f"Suspicious Scheduled Task: '{name}'",
+                severity=self.severity,
+                description=f"Task '{name}' executes commands from suspicious location: {cmd[:120]}",
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary=f"Task '{name}' -> {cmd[:90]}",
+                mitre=self.mitre,
+                details=record.details,
+            )
+        return None
+
+
+class DefenderMalwareDetectionRule(BaseRule):
+    """Detects Windows Defender malware detections, infected resources, and configuration changes."""
+
+    rule_id = "waeaa.antivirus.malware_detected"
+    title = "Antivirus Malware Detection or Protection Event"
+    severity = Severity.HIGH
+    mitre = MitreAttack(
+        tactic="Execution",
+        technique_id="T1204.002",
+        technique_name="User Execution: Malicious File",
+    )
+    description = (
+        "Windows Defender Antivirus recorded a malware detection event, suspicious threat item, "
+        "or antimalware configuration alteration."
+    )
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for Windows Defender alerts."""
+        if record.artefact_type != "EventLog":
+            return None
+
+        channel = str(record.details.get("channel", "")).lower()
+        provider = str(record.details.get("provider", "")).lower()
+        if "defender" not in channel and "defender" not in provider:
+            return None
+
+        event_id = record.details.get("event_id")
+        if event_id in (1000, 1001, 1002, 1116, 1117):
+            return Finding(
+                finding_id=f"{self.rule_id}-{record.timestamp_utc}-{event_id}",
+                rule_id=self.rule_id,
+                title=f"Defender Detection Event (Event ID {event_id})",
+                severity=Severity.HIGH,
+                description="Windows Defender Antivirus identified malware or suspicious software.",
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary=f"Defender Malware Event ID {event_id}",
+                mitre=self.mitre,
+                details=record.details,
+            )
+        elif event_id == 5007:
+            return Finding(
+                finding_id=f"{self.rule_id}-5007-{record.timestamp_utc}",
+                rule_id=self.rule_id,
+                title="Defender Antivirus Configuration Changed",
+                severity=Severity.MEDIUM,
+                description="Defender protection configuration or exclusion setting was modified.",
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary="Defender Configuration Modified (Event ID 5007)",
+                mitre=MitreAttack(tactic="Defense Evasion", technique_id="T1562.001", technique_name="Impair Defenses: Disable or Modify Tools"),
                 details=record.details,
             )
         return None
@@ -569,7 +771,11 @@ def get_default_detection_rules() -> list[BaseRule]:
     """Instantiate and return standard detection rules."""
     return [
         LogClearingRule(),
-        RdpActivityRule(),
+        RdpIntrusionRule(),
+        SmbAdminShareLateralMovementRule(),
+        PsExecRansomwareDeploymentRule(),
+        SuspiciousScheduledTaskRule(),
+        DefenderMalwareDetectionRule(),
         SuspiciousServiceRule(),
         PowerShellSuspiciousRule(),
         ShadowCopyDeletionRule(),

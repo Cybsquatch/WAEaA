@@ -384,6 +384,7 @@ func buildControls(parent, hInstance syscall.Handle) {
 		{"win.powershell_history", "PowerShell Console History"},
 		{"win.recycle_bin", "Recycle Bin Records ($I*)"},
 		{"win.browser_history", "Browser History (Chrome, Edge, Firefox)"},
+		{"win.rdp_cache", "RDP Bitmap Cache (.bmc, .bin tiles)"},
 		{"win.filesystem_mft", "NTFS Metadata ($MFT, $LogFile, $UsnJrnl)"},
 	}
 
@@ -396,7 +397,7 @@ func buildControls(parent, hInstance syscall.Handle) {
 		}
 		state.ruleChecks[r.id] = chk
 		rowY += 24
-		if i == 5 {
+		if i == 6 {
 			colX = 290
 			rowY = 182
 		}

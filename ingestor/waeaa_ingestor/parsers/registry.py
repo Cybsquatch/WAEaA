@@ -9,7 +9,9 @@ from waeaa_ingestor.parsers.windows import (
     EvtxParser,
     LnkParser,
     PrefetchParser,
+    RdpCacheParser,
     RegistryHiveParser,
+    TaskSchedulerParser,
 )
 
 
@@ -21,6 +23,8 @@ def get_default_parsers() -> list[BaseParser]:
         RegistryHiveParser(),
         LnkParser(),
         BrowserHistoryParser(),
+        RdpCacheParser(),
+        TaskSchedulerParser(),
         SyslogParser(),
         WtmpParser(),
         ShellHistoryParser(),

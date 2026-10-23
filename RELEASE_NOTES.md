@@ -1,69 +1,51 @@
-# WAEaA Release Notes &mdash; Version 1.0.0
+# WAEaA Release Notes &mdash; Version 1.1.0
 
-**Release Date:** 2026-10-22  
+**Release Date:** 2026-10-23  
 **Repository:** `https://github.com/Cybsquatch/WAEaA`  
-**License:** Proprietary Commercial (Permissive third-party runtime dependencies)
+**License:** Proprietary Commercial (Permissive runtime dependencies)
 
-WAEaA (*Windows Artifacts Extractor and Analyzer*) version 1.0.0 represents the inaugural production release of our unified, legally sound digital forensics and incident response (DFIR) suite.
-
----
-
-## 1. Major Highlights
-
-### Windows Collector (`waeaa.exe` & `waeaa-legacy.exe`)
-* **Unified Single Binary:** Serves both command-line workflows and a native Win32 graphical user interface in a single executable.
-* **Auto-Elevation (UAC):** When launched via double-click, automatically requests administrator privileges without popping an extraneous console window.
-* **Locked File Extraction via Raw NTFS:** Direct cluster-level access to master file tables (`$MFT`), active registry hives, and locked event logs using `SeBackupPrivilege`.
-* **Volume Shadow Copy (VSS) Integration:** Automatic enumerated fallback to past snapshot states.
-* **Legacy Windows 7 Support:** Dedicated `waeaa-legacy.exe` compiled with Go 1.20 toolchain, supporting Windows 7 SP1, Windows 8/8.1, and Windows Server 2008 R2 / 2012 R2.
-
-### Linux Collector (`waeaa-linux-*`)
-* **Distro-Aware Architecture:** Automatically identifies Debian, Ubuntu, RHEL, CentOS, Rocky, Alma, SUSE, Arch, and Amazon Linux, adjusting target log paths accordingly.
-* **Interactive Terminal User Interface (TUI):** Built with pure Go terminal primitives, enabling rapid on-target rule selection and execution.
-* **Static Binary:** Zero dynamic runtime dependencies; runs on any standard Linux kernel 3.10+.
-
-### WAEaA Ingestor & Detection Engine
-* **GUI-Only Forensic Workstation Application:** Built with Python 3.11+ and Qt (PySide6), windowed without a command prompt.
-* **Proprietary Binary Decoders:**
-  * Windows Event Logs (`.evtx`) chunk and record parser.
-  * Windows Prefetch (`.pf`) supporting SCCA headers and proprietary LZXPRESS MAM decompression.
-  * Registry Hive (`regf`/`nk`/`vk`) parser for Run keys, services, and accounts.
-  * Shell Link (`.lnk`) binary structure decoder.
-  * Chromium & Firefox SQLite history and downloads parser.
-  * Linux `syslog`, `auth.log`, 384-byte `utmp`/`wtmp` records, user shell history, and cron tables.
-* **Normalized Super-Timeline:** Generates chronological ISO 8601 UTC event timelines merging filesystem MACB metadata and parsed application records.
-* **Security Detection Engine:**
-  * Credential dumping (LSASS access, `sekurlsa`, `procdump`, `comsvcs.dll`).
-  * Anti-forensics (Security event log clearing Event 1102 / 104).
-  * Ransomware activity (Volume Shadow Copy deletion).
-  * Living-off-the-land binaries (LOLBins: `certutil`, `bitsadmin`, `mshta`, `regsvr32`).
-  * Persistence mechanisms (Registry Run/RunOnce, suspicious service creation Event 7045).
-  * Interactive Linux reverse shells (`/dev/tcp`, `nc -e`, Python socket redirection).
-* **Offline Threat Intelligence:** Integrated hash database (SHA-256), vulnerable driver blocklist (BYOVD), and malicious C2 IP indicators.
-* **Interactive Single-File HTML Report (`report.html`):** Fully offline dashboard featuring executive metrics, MITRE ATT&CK tactic matrix, instant full-text search, severity filtering, super-timeline explorer, and client-side CSV export with zero CDN dependencies.
-* **Automated Packaging:** Consolidates analysis results into `<HOSTNAME>_analysis_<timestamp>.zip`.
+Version 1.1.0 delivers major incident response capabilities: proprietary RDP Bitmap Cache extraction and edge pixel-matching screen reconstruction, Windows Scheduled Tasks analysis, an expanded MITRE ATT&CK detection engine generating deep threat coverage, and an advanced interactive single-file HTML report with composite filters and targeted exports.
 
 ---
 
-## 2. Supported Languages (i18n)
-All user interfaces (Windows GUI, Linux TUI, Ingestor GUI) and reports support:
-* English (`en`)
-* Italian (`it`)
-* Spanish (`es`)
-* French (`fr`)
-* German (`de`)
+## 1. Major Highlights in Version 1.1.0
+
+### RDP Bitmap Cache & Desktop Screen Reconstructor
+* **Targeted Artefact Collection:** Collector rule `win.rdp_cache` automatically extracts `.bmc` (legacy) and `.bin` (RDP 8+) bitmap cache files from all user profiles (`AppData\Local\Microsoft\Terminal Server Client\Cache\*`).
+* **Proprietary Tile Parser (`rdp_cache.py`):** Decodes 16-bit, 24-bit, and 32-bit ARGB 64x64 pixel bitmap tiles without third-party dependencies.
+* **Edge Pixel-Matching Reconstruction:** Proprietary algorithm analyzes boundary color gradients across adjacent horizontal and vertical edges to reconstruct panoramic and collage desktop screenshots.
+* **Dual Output Mode:** Preserves all raw tiles in evidence folder `rdp_tiles/` and embeds reconstructed screen mosaics into the standalone HTML report.
+
+### Windows Scheduled Tasks XML Parser (`tasks.py`)
+* **Persistence & Lateral Movement Visibility:** Parses XML task definitions from `%SystemRoot%\System32\Tasks` and `SysWOW64\Tasks`.
+* **Execution Profiling:** Extracts Task Name, Author, Principals, RunLevel (`HighestAvailable`), Triggers, and Exec commands with arguments.
+* **Incident Detection:** Discovered the NIST dataset's core persistence and ransomware deployment task (`Enterpries backup` deploying `rename.exe` via `PsExec.exe -accept-eula` across `\\Desktop-001` through `\\Desktop-006`).
+
+### Expanded Threat Detection Engine
+* **Lateral Movement via SMB Admin Shares:** Flags connections to `\\*\ADMIN$`, `\\*\C$`, and `\\*\IPC$` (Event ID 31010 / 5140 / 5145).
+* **RDP Intrusion & External Logons:** Flags inbound RDP authentications (Event ID 1149) with source IP extraction (e.g. `31.220.85.162`), session reconnects (Event 25), and logons (Event 21).
+* **Ransomware & PsExec Staging:** Detects PsExec remote execution, hardcoded credentials (`-p letmein`), and ransomware executables (`rename.exe`, `petya`).
+* **Antivirus & Malware Alerts:** Flags Windows Defender detection events (Event ID 1000, 1001, 1116, 1117, 5007).
+* **Defense Evasion / Log Clearing:** Detects deliberate event log clearing (Event ID 104 and 1102).
+
+### Advanced HTML Report v1.1
+* **Composite Filtering:** Combined real-time multi-criteria filtering: free-text search + severity checkboxes + MITRE ATT&CK tactic dropdown + date range.
+* **Row Flagging & Targeted Export:** Checkbox selection on findings and timeline events with one-click export of selected rows to **CSV**, **JSON**, or direct **Copy to Clipboard**.
+* **Full-Page Export & Print:** Print-friendly styling with clean layout for PDF generation and executive reporting.
+* **Interactive MITRE Matrix:** Clickable tactic columns dynamically filter the findings table.
+* **Embedded RDP Screenshot Gallery:** Interactive visual canvas and tile strip.
+
+### Collector Usability & Stability Fixes
+* **Win32 GUI Thread Pinning:** Implemented `runtime.LockOSThread()` in the collector GUI to eliminate message pump desynchronization and Windows "(Not Responding)" states.
+* **Automatic Drive Detection & Checkboxes:** Displays all detected logical drives (`C:\`, `D:\`, `E:\`, etc.) with filesystem and capacity; supports simultaneous multi-drive extraction into a single evidence archive.
+* **Win64 Struct Alignment:** Corrected `MSG` struct padding and stdcall callback signature for x64 architecture.
 
 ---
 
-## 3. Forensic Integrity & Chain of Custody
-Every acquisition produces:
-* `_meta/manifest.json`: Cryptographic SHA-256, SHA-1, MD5 hashes, source paths, acquisition timestamps, and byte counts.
-* `_meta/chain_of_custody.json`: Examiner details, case reference, explicit authorization confirmation, and UTC time spans.
-* `_meta/collection.log`: Full chronological operational log.
-
----
-
-## 4. Quality & Verification
-* **Collector:** 100% test pass rate across all packages (`internal/ntfs`, `internal/vss`, `internal/engine`, `internal/evidence`, `internal/distro`, `internal/cli`, `internal/i18n`).
-* **Ingestor:** 53 test cases passing with zero warnings or errors under `ruff` and strict `mypy`.
-* **CI:** Multi-platform GitHub Actions covering Windows and Linux runners with race detector verification.
+## 2. Release Asset Packages
+* `waeaa-v1.1.0-windows-amd64.zip` &mdash; Modern Windows 10/11, Server 2016-2025
+* `waeaa-v1.1.0-windows-legacy-amd64.zip` &mdash; Windows 7 SP1, 8, 8.1, Server 2008 R2, 2012
+* `waeaa-v1.1.0-windows-legacy-x86.zip` &mdash; 32-bit Windows 7 / 8 / 10
+* `waeaa-v1.1.0-linux-amd64.tar.gz` &mdash; Linux x86_64 static binary
+* `waeaa-v1.1.0-linux-arm64.tar.gz` &mdash; Linux aarch64 static binary
+* `waeaa-ingestor-v1.1.0-windows-amd64.zip` &mdash; Standalone GUI Ingestor & Analyzer

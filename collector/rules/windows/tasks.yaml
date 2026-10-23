@@ -8,3 +8,7 @@ targets:
     mask: '*'
     recursive: true
     comment: Scheduled tasks XML files
+  - path: '%SystemRoot%\SysWOW64\Tasks'
+    mask: '*'
+    recursive: true
+    comment: 32-bit scheduled tasks XML files

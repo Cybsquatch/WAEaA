@@ -15,3 +15,4 @@ rules:
   - win.powershell_history
   - win.recycle_bin
   - win.browser_history
+  - win.rdp_cache
