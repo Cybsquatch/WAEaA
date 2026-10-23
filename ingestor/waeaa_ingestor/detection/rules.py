@@ -109,8 +109,8 @@ class RdpIntrusionRule(BaseRule):
             return None
 
         if event_id == 1149:
-            user = record.details.get("param_4", record.user or "Unknown")
-            src_ip = record.details.get("param_5", "Unknown")
+            user = record.user or record.details.get("user") or record.details.get("Param1") or record.details.get("param_4", "Unknown")
+            src_ip = record.details.get("ip_address") or record.details.get("Param3") or record.details.get("param_5", "Unknown")
             return Finding(
                 finding_id=f"{self.rule_id}-1149-{record.timestamp_utc}-{src_ip}",
                 rule_id=self.rule_id,
@@ -156,7 +156,7 @@ class SmbAdminShareLateralMovementRule(BaseRule):
         "Threat actors use administrative shares to stage payloads, execute remote services, and propagate ransomware."
     )
 
-    ADMIN_SHARE_PATTERN = re.compile(r"\\([a-zA-Z0-9_\-\.]+)\\(admin\$|c\$|ipc\$)", re.IGNORECASE)
+    ADMIN_SHARE_PATTERN = re.compile(r"\\([a-zA-Z0-9_\-\.\*]+)\\(admin\$|c\$|ipc\$)", re.IGNORECASE)
 
     def evaluate(self, record: ParsedRecord) -> Finding | None:
         """Check for admin share access in SMB client events or security logs."""
@@ -218,6 +218,250 @@ class PsExecRansomwareDeploymentRule(BaseRule):
                 details=record.details,
             )
         return None
+
+
+class RemoteLogonRule(BaseRule):
+    """Detects remote network or RDP logons (Event 4624) from external or suspicious IP addresses."""
+
+    rule_id = "waeaa.security.remote_logon"
+    title = "Remote Network or RDP Logon (Event 4624)"
+    severity = Severity.HIGH
+    mitre = MitreAttack(
+        tactic="Lateral Movement",
+        technique_id="T1078.002",
+        technique_name="Valid Accounts: Domain Accounts",
+    )
+    description = (
+        "Successful network or remote interactive (RDP) logon recorded. "
+        "Adversaries leverage compromised or valid administrative credentials for lateral movement."
+    )
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for remote logons with IP addresses or administrative accounts."""
+        if record.artefact_type != "EventLog":
+            return None
+
+        event_id = record.details.get("event_id")
+        if event_id != 4624:
+            return None
+
+        ip = str(record.details.get("ip_address", "")).strip()
+        lt = str(record.details.get("logon_type", ""))
+        user = record.user or str(record.details.get("user", ""))
+
+        # Only alert on network/remote logons (LogonType 3, 10, or when an IP is present)
+        is_remote = "3" in lt or "10" in lt or bool(ip and ip not in ("-", "127.0.0.1", "::1"))
+        if not is_remote:
+            return None
+
+        # Determine severity: external IP or privileged account -> CRITICAL/HIGH
+        is_external_ip = bool(ip and not ip.startswith(("10.", "192.168.", "172.16.", "172.17.", "172.18.", "172.19.", "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.", "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.", "127.")))
+        is_admin_user = any(a in user.lower() for a in ("admin", "administrator", "root"))
+
+        if is_external_ip and is_admin_user:
+            sev = Severity.CRITICAL
+        elif is_external_ip:
+            sev = Severity.HIGH
+        elif is_admin_user:
+            sev = Severity.HIGH
+        else:
+            sev = Severity.MEDIUM
+
+        ws = record.details.get("workstation", "")
+        ws_part = f" from Workstation '{ws}'" if ws else ""
+        ip_part = f" (IP: {ip})" if ip else ""
+
+        return Finding(
+            finding_id=f"{self.rule_id}-{record.timestamp_utc}-{user}-{ip}",
+            rule_id=self.rule_id,
+            title=f"Remote Logon: '{user}'{ip_part}",
+            severity=sev,
+            description=f"Successful remote logon for account '{user}' via LogonType {lt}{ws_part}{ip_part}.",
+            timestamp_utc=record.timestamp_utc,
+            source_artefact=record.source_file,
+            summary=record.summary,
+            mitre=self.mitre,
+            details=record.details,
+        )
+
+
+class FailedLogonRule(BaseRule):
+    """Detects failed authentication attempts (Event 4625) indicative of password spraying or brute force."""
+
+    rule_id = "waeaa.security.failed_logon"
+    title = "Failed Authentication Attempt (Event 4625)"
+    severity = Severity.MEDIUM
+    mitre = MitreAttack(
+        tactic="Credential Access",
+        technique_id="T1110",
+        technique_name="Brute Force",
+    )
+    description = (
+        "An account failed to log on. Multiple failed logon attempts indicate brute force, "
+        "credential stuffing, or password guessing attacks."
+    )
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for Event 4625 failed logons."""
+        if record.artefact_type != "EventLog":
+            return None
+
+        event_id = record.details.get("event_id")
+        if event_id != 4625:
+            return None
+
+        user = record.user or str(record.details.get("user", "Unknown"))
+        ip = str(record.details.get("ip_address", ""))
+        is_external = bool(ip and not ip.startswith(("10.", "192.168.", "172.16.", "127.")))
+
+        return Finding(
+            finding_id=f"{self.rule_id}-{record.timestamp_utc}-{user}-{ip}",
+            rule_id=self.rule_id,
+            title=f"Failed Logon: '{user}'" + (f" from {ip}" if ip else ""),
+            severity=Severity.HIGH if is_external else Severity.MEDIUM,
+            description=f"Logon failure recorded for account '{user}'. {record.summary}",
+            timestamp_utc=record.timestamp_utc,
+            source_artefact=record.source_file,
+            summary=record.summary,
+            mitre=self.mitre,
+            details=record.details,
+        )
+
+
+class UserAccountCreatedRule(BaseRule):
+    """Detects the creation of new Windows local or domain user accounts (Event 4720)."""
+
+    rule_id = "waeaa.persistence.account_created"
+    title = "New User Account Created (Event 4720)"
+    severity = Severity.HIGH
+    mitre = MitreAttack(
+        tactic="Persistence",
+        technique_id="T1136.001",
+        technique_name="Create Account: Local Account",
+    )
+    description = (
+        "A new user account was created. Adversaries frequently create rogue administrative "
+        "accounts to maintain persistence within compromised environments."
+    )
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for Event 4720 account creations."""
+        if record.artefact_type != "EventLog":
+            return None
+
+        event_id = record.details.get("event_id")
+        if event_id != 4720:
+            return None
+
+        target = record.details.get("TargetUserName", "Unknown")
+        actor = record.user or "Unknown"
+
+        return Finding(
+            finding_id=f"{self.rule_id}-{record.timestamp_utc}-{target}",
+            rule_id=self.rule_id,
+            title=f"User Account Created: '{target}'",
+            severity=self.severity,
+            description=f"User account '{target}' was created by '{actor}'.",
+            timestamp_utc=record.timestamp_utc,
+            source_artefact=record.source_file,
+            summary=record.summary,
+            mitre=self.mitre,
+            details=record.details,
+        )
+
+
+class PrivilegedGroupModificationRule(BaseRule):
+    """Detects addition of users to security-enabled groups (Event 4728, 4732, 4756)."""
+
+    rule_id = "waeaa.persistence.privileged_group_add"
+    title = "User Added to Security Group (Event 4728/4732/4756)"
+    severity = Severity.HIGH
+    mitre = MitreAttack(
+        tactic="Privilege Escalation",
+        technique_id="T1098",
+        technique_name="Account Manipulation",
+    )
+    description = (
+        "A member was added to a security-enabled group (such as Administrators or Remote Desktop Users). "
+        "Threat actors use group membership changes to elevate privileges."
+    )
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for group membership additions."""
+        if record.artefact_type != "EventLog":
+            return None
+
+        event_id = record.details.get("event_id")
+        if event_id not in (4728, 4732, 4756):
+            return None
+
+        member = record.details.get("MemberName", record.details.get("param_0", "Unknown"))
+        target_grp = record.details.get("TargetUserName", "SecurityGroup")
+
+        return Finding(
+            finding_id=f"{self.rule_id}-{record.timestamp_utc}-{target_grp}-{member}",
+            rule_id=self.rule_id,
+            title=f"Member '{member}' Added to Group '{target_grp}'",
+            severity=self.severity,
+            description=f"Account '{member}' was granted membership in group '{target_grp}'.",
+            timestamp_utc=record.timestamp_utc,
+            source_artefact=record.source_file,
+            summary=record.summary,
+            mitre=self.mitre,
+            details=record.details,
+        )
+
+
+class NetworkShareAccessRule(BaseRule):
+    """Detects access to administrative network shares (ADMIN$, C$, IPC$) via Security Events 5140 and 5145."""
+
+    rule_id = "waeaa.lateral_movement.network_share_access"
+    title = "Administrative Network Share Accessed (Event 5140/5145)"
+    severity = Severity.HIGH
+    mitre = MitreAttack(
+        tactic="Lateral Movement",
+        technique_id="T1021.002",
+        technique_name="Remote Services: SMB/Windows Admin Shares",
+    )
+    description = (
+        "A network share or file within an administrative share (ADMIN$, C$, IPC$) was accessed. "
+        "Adversaries use admin shares to transfer tools and execute commands remotely."
+    )
+
+    ADMIN_SHARE_PATTERN = re.compile(r"\\([a-zA-Z0-9_\-\.\*]+)\\(admin\$|c\$|ipc\$)", re.IGNORECASE)
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for Event 5140/5145 administrative share events."""
+        if record.artefact_type != "EventLog":
+            return None
+
+        event_id = record.details.get("event_id")
+        if event_id not in (5140, 5145):
+            return None
+
+        share = str(record.details.get("share_name", record.details.get("ShareName", "")))
+        if not self.ADMIN_SHARE_PATTERN.search(share):
+            return None
+
+        user = record.user or str(record.details.get("user", "Unknown"))
+        ip = str(record.details.get("ip_address", ""))
+        rel_target = str(record.details.get("relative_target", record.details.get("RelativeTargetName", "")))
+
+        target_part = f" (File: {rel_target})" if rel_target else ""
+        ip_part = f" from IP: {ip}" if ip else ""
+
+        return Finding(
+            finding_id=f"{self.rule_id}-{record.timestamp_utc}-{share}-{user}",
+            rule_id=self.rule_id,
+            title=f"Admin Share Accessed: '{share}'{ip_part}",
+            severity=self.severity,
+            description=f"Administrative share '{share}' was accessed by '{user}'{ip_part}{target_part}.",
+            timestamp_utc=record.timestamp_utc,
+            source_artefact=record.source_file,
+            summary=record.summary,
+            mitre=self.mitre,
+            details=record.details,
+        )
 
 
 class SuspiciousScheduledTaskRule(BaseRule):
@@ -772,6 +1016,11 @@ def get_default_detection_rules() -> list[BaseRule]:
     return [
         LogClearingRule(),
         RdpIntrusionRule(),
+        RemoteLogonRule(),
+        FailedLogonRule(),
+        UserAccountCreatedRule(),
+        PrivilegedGroupModificationRule(),
+        NetworkShareAccessRule(),
         SmbAdminShareLateralMovementRule(),
         PsExecRansomwareDeploymentRule(),
         SuspiciousScheduledTaskRule(),
