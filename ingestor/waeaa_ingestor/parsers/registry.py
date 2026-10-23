@@ -7,12 +7,16 @@ from waeaa_ingestor.parsers.linux import CronParser, ShellHistoryParser, SyslogP
 from waeaa_ingestor.parsers.windows import (
     BrowserHistoryParser,
     EvtxParser,
+    HostsFileParser,
     LnkParser,
     MftParser,
+    PowerShellHistoryParser,
     PrefetchParser,
     RdpCacheParser,
     RegistryHiveParser,
+    SetupApiParser,
     TaskSchedulerParser,
+    WerParser,
 )
 
 
@@ -27,6 +31,10 @@ def get_default_parsers() -> list[BaseParser]:
         RdpCacheParser(),
         TaskSchedulerParser(),
         MftParser(),
+        SetupApiParser(),
+        HostsFileParser(),
+        PowerShellHistoryParser(),
+        WerParser(),
         SyslogParser(),
         WtmpParser(),
         ShellHistoryParser(),

@@ -9,8 +9,13 @@ from waeaa_ingestor.parsers.linux.cron import CronParser
 from waeaa_ingestor.parsers.linux.history import ShellHistoryParser
 from waeaa_ingestor.parsers.linux.syslog import SyslogParser
 from waeaa_ingestor.parsers.linux.wtmp import UTMP_RECORD_SIZE, WtmpParser
+from waeaa_ingestor.parsers.windows.hosts import HostsFileParser
 from waeaa_ingestor.parsers.windows.lnk import LNK_CLSID, LnkParser
+from waeaa_ingestor.parsers.windows.mft import MftParser
 from waeaa_ingestor.parsers.windows.prefetch import PREFETCH_SCCA, PrefetchParser
+from waeaa_ingestor.parsers.windows.pshistory import PowerShellHistoryParser
+from waeaa_ingestor.parsers.windows.setupapi import SetupApiParser
+from waeaa_ingestor.parsers.windows.wer import WerParser
 
 
 def test_syslog_parser() -> None:
@@ -176,7 +181,6 @@ def test_task_scheduler_parser() -> None:
 
 
 def test_mft_parser() -> None:
-    from waeaa_ingestor.parsers.windows.mft import MftParser
 
     parser = MftParser()
     assert parser.can_parse(r"C:\$MFT") is True
@@ -234,3 +238,84 @@ def test_mft_parser() -> None:
     assert recs[0].details["file_size"] == 123456
     assert recs[0].details["is_active"] is True
     assert recs[0].timestamp_utc.startswith("2024-01-01")
+
+
+def test_setupapi_parser() -> None:
+    parser = SetupApiParser()
+    assert parser.can_parse(r"C:\Windows\inf\setupapi.dev.log") is True
+
+    log_data = (
+        b">>>  [Device Install (DiShowUpdateDevice) - USB\\VID_0781&PID_5583\\123456789]\n"
+        b">>>  Section start 2024/02/06 14:22:10.123\n"
+        b"cmd: C:\\Windows\\system32\\deviceinstall.exe\n"
+        b"<<<  Section end 2024/02/06 14:22:12.456\n"
+    )
+
+    recs = list(parser.parse(io.BytesIO(log_data), "setupapi.dev.log"))
+    assert len(recs) == 1
+    assert recs[0].artefact_type == "USBDevice"
+    assert recs[0].details["vendor_id"] == "0781"
+    assert recs[0].details["product_id"] == "5583"
+    assert "2024-02-06" in recs[0].timestamp_utc
+
+
+def test_hosts_file_parser() -> None:
+    parser = HostsFileParser()
+    assert parser.can_parse(r"C:\Windows\System32\drivers\etc\hosts") is True
+
+    hosts_data = (
+        b"# Localhost mappings\n"
+        b"127.0.0.1 localhost\n"
+        b"::1 localhost\n"
+        b"192.168.1.100 malicious-c2.com c2.com\n"
+    )
+
+    recs = list(parser.parse(io.BytesIO(hosts_data), "hosts"))
+    assert len(recs) == 1
+    assert recs[0].artefact_type == "NetworkConfig"
+    assert recs[0].details["ip_address"] == "192.168.1.100"
+    assert "malicious-c2.com" in recs[0].details["hostname"]
+
+
+def test_pshistory_parser() -> None:
+    parser = PowerShellHistoryParser()
+    assert parser.can_parse(r"AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt") is True
+
+    history_data = (
+        b"whoami /all\n"
+        b"Invoke-Mimikatz -DumpCreds\n"
+        b"Get-Process lsass\n"
+    )
+
+    recs = list(parser.parse(io.BytesIO(history_data), "ConsoleHost_history.txt"))
+    assert len(recs) == 3
+    assert recs[0].artefact_type == "PowerShellHistory"
+    assert "Invoke-Mimikatz -DumpCreds" in recs[1].summary
+
+
+def test_wer_parser() -> None:
+    parser = WerParser()
+    assert parser.can_parse(r"ReportQueue\AppCrash_test.exe_123\Report.wer") is True
+
+    wer_data = (
+        "Version=1\n"
+        "EventType=AppCrash\n"
+        "EventTime=133485408000000000\n"
+        "ReportIdentifier=abc-123\n"
+        "AppName=mimikatz.exe\n"
+        "AppPath=C:\\Windows\\Temp\\mimikatz.exe\n"
+        "Sig[0].Name=Application Name\n"
+        "Sig[0].Value=mimikatz.exe\n"
+        "Sig[3].Name=Fault Module Name\n"
+        "Sig[3].Value=ntdll.dll\n"
+        "Sig[6].Name=Exception Code\n"
+        "Sig[6].Value=c0000005\n"
+    ).encode("utf-16le")
+
+    recs = list(parser.parse(io.BytesIO(wer_data), "Report.wer"))
+    assert len(recs) == 1
+    assert recs[0].artefact_type == "wer_crash"
+    assert recs[0].process_name == "mimikatz.exe"
+    assert recs[0].details["fault_module"] == "ntdll.dll"
+    assert recs[0].details["exception_code"] == "c0000005"
+

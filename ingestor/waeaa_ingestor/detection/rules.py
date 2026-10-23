@@ -1009,6 +1009,1136 @@ class LinuxCronSuspiciousRule(BaseRule):
         return None
 
 
+class LsassMemoryDumpRule(BaseRule):
+    """Detects LSASS process memory dumping attempts (comsvcs, procdump, nanodump)."""
+
+    rule_id = "waeaa.credential_access.lsass_dump"
+    title = "LSASS Memory Dump Attempt"
+    severity = Severity.CRITICAL
+    mitre = MitreAttack(
+        tactic="Credential Access",
+        technique_id="T1003.001",
+        technique_name="OS Credential Dumping: LSASS Memory",
+    )
+    description = (
+        "Adversaries dump LSASS memory to extract plain-text passwords, NTLM hashes, and Kerberos tickets "
+        "using comsvcs.dll MiniDump, procdump, sqldumper, or nanodump."
+    )
+
+    PATTERNS = [
+        re.compile(r"comsvcs(\.dll)?\s+(#24|minidump)", re.IGNORECASE),
+        re.compile(r"procdump(\.exe)?\s+.*(-ma)?\s+.*lsass", re.IGNORECASE),
+        re.compile(r"nanodump(\.exe)?", re.IGNORECASE),
+        re.compile(r"sqldumper(\.exe)?\s+.*0x0120", re.IGNORECASE),
+        re.compile(r"lsass\.dmp", re.IGNORECASE),
+    ]
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for LSASS memory dumping indicators."""
+        text = get_record_full_text(record)
+        for p in self.PATTERNS:
+            if p.search(text):
+                return Finding(
+                    finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+                    rule_id=self.rule_id,
+                    title=self.title,
+                    severity=self.severity,
+                    description=self.description,
+                    timestamp_utc=record.timestamp_utc,
+                    source_artefact=record.source_file,
+                    summary=f"LSASS dump indicator detected: {record.summary}",
+                    mitre=self.mitre,
+                    details=record.details,
+                )
+        return None
+
+
+class NtdsutilDumpingRule(BaseRule):
+    """Detects Active Directory database (NTDS.dit) extraction."""
+
+    rule_id = "waeaa.credential_access.ntds_dump"
+    title = "Active Directory Database Extraction (NTDS.dit)"
+    severity = Severity.CRITICAL
+    mitre = MitreAttack(
+        tactic="Credential Access",
+        technique_id="T1003.003",
+        technique_name="OS Credential Dumping: NTDS",
+    )
+    description = (
+        "Extraction of Active Directory database NTDS.dit and SYSTEM hive using ntdsutil IFM or shadow copy snapshots."
+    )
+
+    PATTERNS = [
+        re.compile(r"ntdsutil(\.exe)?\s+.*(ifm|create\s+full|ac\s+i\s+ntds)", re.IGNORECASE),
+        re.compile(r"esentutl(\.exe)?\s+.*ntds\.dit", re.IGNORECASE),
+        re.compile(r"copy\s+.*ntds\.dit", re.IGNORECASE),
+    ]
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for NTDS.dit extraction commands."""
+        text = get_record_full_text(record)
+        for p in self.PATTERNS:
+            if p.search(text):
+                return Finding(
+                    finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+                    rule_id=self.rule_id,
+                    title=self.title,
+                    severity=self.severity,
+                    description=self.description,
+                    timestamp_utc=record.timestamp_utc,
+                    source_artefact=record.source_file,
+                    summary=f"NTDS extraction indicator detected: {record.summary}",
+                    mitre=self.mitre,
+                    details=record.details,
+                )
+        return None
+
+
+class SamHiveExportRule(BaseRule):
+    """Detects export or copy of SAM, SYSTEM, or SECURITY registry hives."""
+
+    rule_id = "waeaa.credential_access.sam_hive_export"
+    title = "Registry SAM / SYSTEM Hive Export"
+    severity = Severity.HIGH
+    mitre = MitreAttack(
+        tactic="Credential Access",
+        technique_id="T1003.002",
+        technique_name="OS Credential Dumping: Security Account Manager",
+    )
+    description = (
+        "Exporting registry hives (SAM, SYSTEM, SECURITY) via reg.exe to crack local passwords and extract LSA secrets offline."
+    )
+
+    PATTERNS = [
+        re.compile(r"reg(\.exe)?\s+save\s+hklm\\(sam|system|security)", re.IGNORECASE),
+        re.compile(r"reg(\.exe)?\s+export\s+hklm\\(sam|system|security)", re.IGNORECASE),
+    ]
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for SAM/SYSTEM registry hive exports."""
+        text = get_record_full_text(record)
+        for p in self.PATTERNS:
+            if p.search(text):
+                return Finding(
+                    finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+                    rule_id=self.rule_id,
+                    title=self.title,
+                    severity=self.severity,
+                    description=self.description,
+                    timestamp_utc=record.timestamp_utc,
+                    source_artefact=record.source_file,
+                    summary=f"Registry hive export detected: {record.summary}",
+                    mitre=self.mitre,
+                    details=record.details,
+                )
+        return None
+
+
+class KerberoastingRule(BaseRule):
+    """Detects Kerberos Service Ticket requests with weak RC4 encryption (Event 4769)."""
+
+    rule_id = "waeaa.credential_access.kerberoasting"
+    title = "Kerberoasting Service Ticket Request (RC4 Ticket)"
+    severity = Severity.HIGH
+    mitre = MitreAttack(
+        tactic="Credential Access",
+        technique_id="T1558.003",
+        technique_name="Steal or Forge Kerberos Tickets: Kerberoasting",
+    )
+    description = (
+        "Kerberos ticket request (Event 4769) using legacy RC4 encryption (0x17) indicating potential offline hash cracking."
+    )
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for Kerberoasting event patterns."""
+        if record.artefact_type != "EventLog":
+            return None
+        event_id = record.details.get("event_id")
+        enc_type = str(record.details.get("ticket_encryption_type", "")).lower()
+        if event_id == 4769 and enc_type in ("0x17", "23"):
+            service_name = record.details.get("service_name", "")
+            if service_name and not service_name.endswith("$") and service_name.lower() != "krbtgt":
+                return Finding(
+                    finding_id=f"{self.rule_id}-{record.source_file}-{record.timestamp_utc}",
+                    rule_id=self.rule_id,
+                    title=self.title,
+                    severity=self.severity,
+                    description=self.description,
+                    timestamp_utc=record.timestamp_utc,
+                    source_artefact=record.source_file,
+                    summary=f"Kerberoasting ticket requested for service {service_name} (Encryption 0x17 RC4)",
+                    mitre=self.mitre,
+                    details=record.details,
+                )
+        return None
+
+
+class DCSyncRule(BaseRule):
+    """Detects Directory Service replication operations from non-domain controllers (DCSync)."""
+
+    rule_id = "waeaa.credential_access.dcsync"
+    title = "DCSync Directory Replication Request"
+    severity = Severity.CRITICAL
+    mitre = MitreAttack(
+        tactic="Credential Access",
+        technique_id="T1003.006",
+        technique_name="OS Credential Dumping: DCSync",
+    )
+    description = (
+        "Active Directory replication operations requested by non-DC accounts (DS-Replication-Get-Changes-All extended access rights)."
+    )
+
+    DCSYNC_GUIDS = (
+        "1131f6aa-9c07-11d1-f79f-00c04fc2dcd2",
+        "1131f6ad-9c07-11d1-f79f-00c04fc2dcd2",
+        "89e95b76-444d-4c62-991a-0facbeda40b3",
+    )
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for DCSync access right GUIDs."""
+        if record.artefact_type != "EventLog":
+            return None
+        event_id = record.details.get("event_id")
+        if event_id == 4662:
+            props = str(record.details.get("properties", "")).lower()
+            access_mask = str(record.details.get("access_mask", "")).lower()
+            for g in self.DCSYNC_GUIDS:
+                if g in props or g in access_mask:
+                    return Finding(
+                        finding_id=f"{self.rule_id}-{record.source_file}-{record.timestamp_utc}",
+                        rule_id=self.rule_id,
+                        title=self.title,
+                        severity=self.severity,
+                        description=self.description,
+                        timestamp_utc=record.timestamp_utc,
+                        source_artefact=record.source_file,
+                        summary=f"DCSync directory replication requested by user {record.user}",
+                        mitre=self.mitre,
+                        details=record.details,
+                    )
+        return None
+
+
+class VaultCredentialTheftRule(BaseRule):
+    """Detects enumeration of Windows Credential Vault."""
+
+    rule_id = "waeaa.credential_access.vault_cmdkey"
+    title = "Windows Credential Vault Harvesting"
+    severity = Severity.MEDIUM
+    mitre = MitreAttack(
+        tactic="Credential Access",
+        technique_id="T1555.004",
+        technique_name="Credentials from Password Stores: Windows Credential Manager",
+    )
+    description = "Enumeration of saved credentials using vaultcmd or cmdkey."
+
+    PATTERNS = [
+        re.compile(r"cmdkey(\.exe)?\s+/list", re.IGNORECASE),
+        re.compile(r"vaultcmd(\.exe)?\s+/list", re.IGNORECASE),
+    ]
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for credential manager enumeration commands."""
+        text = get_record_full_text(record)
+        for p in self.PATTERNS:
+            if p.search(text):
+                return Finding(
+                    finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+                    rule_id=self.rule_id,
+                    title=self.title,
+                    severity=self.severity,
+                    description=self.description,
+                    timestamp_utc=record.timestamp_utc,
+                    source_artefact=record.source_file,
+                    summary=f"Credential vault enumeration: {record.summary}",
+                    mitre=self.mitre,
+                    details=record.details,
+                )
+        return None
+
+
+class DefenderTamperingRule(BaseRule):
+    """Detects disabling or modifying Windows Defender security features."""
+
+    rule_id = "waeaa.defense_evasion.defender_tampering"
+    title = "Windows Defender Security Disablement / Tampering"
+    severity = Severity.CRITICAL
+    mitre = MitreAttack(
+        tactic="Defense Evasion",
+        technique_id="T1562.001",
+        technique_name="Impair Defenses: Disable or Modify Tools",
+    )
+    description = (
+        "Attempt to disable or weaken Windows Defender real-time monitoring, behavior analysis, or services."
+    )
+
+    PATTERNS = [
+        re.compile(r"Set-MpPreference\s+.*-DisableRealtimeMonitoring\s+(\$true|1)", re.IGNORECASE),
+        re.compile(r"Set-MpPreference\s+.*-DisableBehaviorMonitoring\s+(\$true|1)", re.IGNORECASE),
+        re.compile(r"Set-MpPreference\s+.*-DisableIOAVProtection\s+(\$true|1)", re.IGNORECASE),
+        re.compile(r"Set-MpPreference\s+.*-ExclusionPath\s+", re.IGNORECASE),
+        re.compile(r"sc(\.exe)?\s+(stop|config)\s+WinDefend", re.IGNORECASE),
+        re.compile(r"net(\.exe)?\s+stop\s+WinDefend", re.IGNORECASE),
+        re.compile(r"MpCmdRun(\.exe)?\s+-RemoveDefinitions", re.IGNORECASE),
+    ]
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for Windows Defender disablement patterns."""
+        text = get_record_full_text(record)
+        for p in self.PATTERNS:
+            if p.search(text):
+                return Finding(
+                    finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+                    rule_id=self.rule_id,
+                    title=self.title,
+                    severity=self.severity,
+                    description=self.description,
+                    timestamp_utc=record.timestamp_utc,
+                    source_artefact=record.source_file,
+                    summary=f"Windows Defender tampering detected: {record.summary}",
+                    mitre=self.mitre,
+                    details=record.details,
+                )
+        return None
+
+
+class AuditpolTamperingRule(BaseRule):
+    """Detects modification of system audit policies via auditpol."""
+
+    rule_id = "waeaa.defense_evasion.auditpol_tampering"
+    title = "Audit Policy Disablement / Tampering"
+    severity = Severity.HIGH
+    mitre = MitreAttack(
+        tactic="Defense Evasion",
+        technique_id="T1562.002",
+        technique_name="Impair Defenses: Disable Windows Event Logging",
+    )
+    description = (
+        "Adversary modified system audit policies using auditpol to suppress security event logging."
+    )
+
+    PATTERN = re.compile(r"auditpol(\.exe)?\s+.*(/set|/clear).*disable", re.IGNORECASE)
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for audit policy tampering."""
+        text = get_record_full_text(record)
+        if self.PATTERN.search(text):
+            return Finding(
+                finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+                rule_id=self.rule_id,
+                title=self.title,
+                severity=self.severity,
+                description=self.description,
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary=f"Audit policy tampering: {record.summary}",
+                mitre=self.mitre,
+                details=record.details,
+            )
+        return None
+
+
+class WevtutilLogClearRule(BaseRule):
+    """Detects clearing Windows event logs using wevtutil command line."""
+
+    rule_id = "waeaa.defense_evasion.wevtutil_cleared"
+    title = "Event Log Purged via Wevtutil"
+    severity = Severity.CRITICAL
+    mitre = MitreAttack(
+        tactic="Defense Evasion",
+        technique_id="T1070.001",
+        technique_name="Indicator Removal on Host: Clear Windows Event Records",
+    )
+    description = "Command line invocation of wevtutil to clear security, system, or application event logs."
+
+    PATTERN = re.compile(r"wevtutil(\.exe)?\s+(cl|clear-log)\s+([a-zA-Z0-9_\-\/]+)", re.IGNORECASE)
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for wevtutil log clearing commands."""
+        text = get_record_full_text(record)
+        match = self.PATTERN.search(text)
+        if match:
+            target_log = match.group(3)
+            return Finding(
+                finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+                rule_id=self.rule_id,
+                title=self.title,
+                severity=self.severity,
+                description=self.description,
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary=f"Event log cleared with wevtutil: {target_log}",
+                mitre=self.mitre,
+                details=record.details,
+            )
+        return None
+
+
+class TimeStompingDiscrepancyRule(BaseRule):
+    """Detects forensic timestamp manipulation (timestomping) in MFT records."""
+
+    rule_id = "waeaa.defense_evasion.timestomp"
+    title = "Forensic Timestomping Discrepancy Detected"
+    severity = Severity.HIGH
+    mitre = MitreAttack(
+        tactic="Defense Evasion",
+        technique_id="T1070.006",
+        technique_name="Indicator Removal on Host: Timestomp",
+    )
+    description = (
+        "Significant discrepancy between MFT $STANDARD_INFORMATION and $FILE_NAME timestamps indicates manual backdating."
+    )
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for MFT timestomping metadata flags."""
+        if record.artefact_type == "MFT" and (
+            record.details.get("si_vs_fn_discrepancy") is True or record.action == "TIMESTOMP_DETECTED"
+        ):
+            fn = record.details.get("filename", record.summary)
+            return Finding(
+                    finding_id=f"{self.rule_id}-{record.source_file}-{record.timestamp_utc}",
+                    rule_id=self.rule_id,
+                    title=self.title,
+                    severity=self.severity,
+                    description=self.description,
+                    timestamp_utc=record.timestamp_utc,
+                    source_artefact=record.source_file,
+                    summary=f"Timestomping detected on file: {fn}",
+                    mitre=self.mitre,
+                    details=record.details,
+                )
+        return None
+
+
+class AccessibilityBackdoorRule(BaseRule):
+    """Detects Image File Execution Options (IFEO) debugger persistence for accessibility binaries."""
+
+    rule_id = "waeaa.persistence.accessibility_backdoor"
+    title = "Accessibility Feature Sticky Keys Backdoor"
+    severity = Severity.CRITICAL
+    mitre = MitreAttack(
+        tactic="Persistence",
+        technique_id="T1546.008",
+        technique_name="Event Triggered Execution: Accessibility Features",
+    )
+    description = (
+        "Modification of Image File Execution Options (IFEO) debugger for sethc.exe, utilman.exe, osk.exe to establish persistence."
+    )
+
+    PATTERN = re.compile(
+        r"Image\s*File\s*Execution\s*Options\\(sethc|utilman|osk|magnify|narrator)\.exe",
+        re.IGNORECASE,
+    )
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for IFEO accessibility backdoors."""
+        text = get_record_full_text(record)
+        if self.PATTERN.search(text) and ("debugger" in text.lower() or "cmd.exe" in text.lower()):
+            return Finding(
+                finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+                rule_id=self.rule_id,
+                title=self.title,
+                severity=self.severity,
+                description=self.description,
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary=f"Accessibility backdoor configured: {record.summary}",
+                mitre=self.mitre,
+                details=record.details,
+            )
+        return None
+
+
+class WmiEventSubscriptionRule(BaseRule):
+    """Detects persistent WMI Event Subscriptions."""
+
+    rule_id = "waeaa.persistence.wmi_event_subscription"
+    title = "WMI Event Subscription Persistence"
+    severity = Severity.HIGH
+    mitre = MitreAttack(
+        tactic="Persistence",
+        technique_id="T1546.003",
+        technique_name="Event Triggered Execution: WMI Event Subscription",
+    )
+    description = (
+        "Creation of WMI CommandLineEventConsumer or ActiveScriptEventConsumer persistence triggers."
+    )
+
+    PATTERNS = [
+        re.compile(r"CommandLineEventConsumer", re.IGNORECASE),
+        re.compile(r"ActiveScriptEventConsumer", re.IGNORECASE),
+        re.compile(r"__FilterToConsumerBinding", re.IGNORECASE),
+    ]
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for WMI consumer persistence indicators."""
+        text = get_record_full_text(record)
+        for p in self.PATTERNS:
+            if p.search(text):
+                return Finding(
+                    finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+                    rule_id=self.rule_id,
+                    title=self.title,
+                    severity=self.severity,
+                    description=self.description,
+                    timestamp_utc=record.timestamp_utc,
+                    source_artefact=record.source_file,
+                    summary=f"WMI persistence consumer detected: {record.summary}",
+                    mitre=self.mitre,
+                    details=record.details,
+                )
+        return None
+
+
+class StartupFolderPersistenceRule(BaseRule):
+    """Detects executable or script files placed in Startup directories."""
+
+    rule_id = "waeaa.persistence.startup_folder"
+    title = "Startup Folder Persistence Item Dropped"
+    severity = Severity.MEDIUM
+    mitre = MitreAttack(
+        tactic="Persistence",
+        technique_id="T1547.001",
+        technique_name="Boot or Logon Autostart Execution: Registry Run Keys / Startup Folder",
+    )
+    description = "Executable or script planted in Startup folder for autostart on user logon."
+
+    PATTERN = re.compile(
+        r"\\(Microsoft|Start\s*Menu)\\Programs\\Startup\\[^\\]+\.(exe|bat|vbs|ps1|lnk|cmd|js|hta)",
+        re.IGNORECASE,
+    )
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for files dropped into Startup folders."""
+        text = get_record_full_text(record)
+        match = self.PATTERN.search(text)
+        if match:
+            return Finding(
+                finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+                rule_id=self.rule_id,
+                title=self.title,
+                severity=self.severity,
+                description=self.description,
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary=f"Startup autorun item detected: {match.group(0)}",
+                mitre=self.mitre,
+                details=record.details,
+            )
+        return None
+
+
+class BitsJobPersistenceRule(BaseRule):
+    """Detects BITS persistent download job creation with execution triggers."""
+
+    rule_id = "waeaa.persistence.bitsadmin"
+    title = "BITS Persistent Job Creation"
+    severity = Severity.HIGH
+    mitre = MitreAttack(
+        tactic="Persistence",
+        technique_id="T1197",
+        technique_name="BITS Jobs",
+    )
+    description = (
+        "BITS background copy job scheduled with notification command line to execute malicious payloads."
+    )
+
+    PATTERN = re.compile(r"bitsadmin(\.exe)?\s+.*(/create|/addfile|/SetNotifyCmdLine)", re.IGNORECASE)
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for bitsadmin persistence commands."""
+        text = get_record_full_text(record)
+        if self.PATTERN.search(text):
+            return Finding(
+                finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+                rule_id=self.rule_id,
+                title=self.title,
+                severity=self.severity,
+                description=self.description,
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary=f"BITS persistent job command: {record.summary}",
+                mitre=self.mitre,
+                details=record.details,
+            )
+        return None
+
+
+class NetshPortForwardingRule(BaseRule):
+    """Detects port forwarding or proxy configuration using netsh portproxy."""
+
+    rule_id = "waeaa.command_and_control.port_proxy"
+    title = "Port Forwarding / Proxy Configured via Netsh"
+    severity = Severity.HIGH
+    mitre = MitreAttack(
+        tactic="Command and Control",
+        technique_id="T1090",
+        technique_name="Proxy",
+    )
+    description = "Netsh portproxy configured to redirect inbound network connections to internal ports or pivot hosts."
+
+    PATTERN = re.compile(r"netsh(\.exe)?\s+interface\s+portproxy\s+add\s+v4tov4", re.IGNORECASE)
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for netsh portproxy commands."""
+        text = get_record_full_text(record)
+        if self.PATTERN.search(text):
+            return Finding(
+                finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+                rule_id=self.rule_id,
+                title=self.title,
+                severity=self.severity,
+                description=self.description,
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary=f"Port proxying configured: {record.summary}",
+                mitre=self.mitre,
+                details=record.details,
+            )
+        return None
+
+
+class MshtaExecutionRule(BaseRule):
+    """Detects Mshta LOLBin execution with script or URL arguments."""
+
+    rule_id = "waeaa.execution.mshta_lolbin"
+    title = "Mshta LOLBin Execution"
+    severity = Severity.HIGH
+    mitre = MitreAttack(
+        tactic="Execution",
+        technique_id="T1218.005",
+        technique_name="System Binary Proxy Execution: Mshta",
+    )
+    description = "Mshta executed with inline script or remote URL payload to bypass application allowlisting."
+
+    PATTERN = re.compile(r"mshta(\.exe)?\s+.*(javascript:|vbscript:|http://|https://)", re.IGNORECASE)
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for suspicious mshta executions."""
+        text = get_record_full_text(record)
+        if self.PATTERN.search(text):
+            return Finding(
+                finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+                rule_id=self.rule_id,
+                title=self.title,
+                severity=self.severity,
+                description=self.description,
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary=f"Mshta proxy execution: {record.summary}",
+                mitre=self.mitre,
+                details=record.details,
+            )
+        return None
+
+
+class CertutilDownloadRule(BaseRule):
+    """Detects Certutil LOLBin used for payload download or base64 decoding."""
+
+    rule_id = "waeaa.execution.certutil_ingress"
+    title = "Certutil Ingress Tool Transfer / Decoding"
+    severity = Severity.HIGH
+    mitre = MitreAttack(
+        tactic="Command and Control",
+        technique_id="T1105",
+        technique_name="Ingress Tool Transfer",
+    )
+    description = "Certutil used to download remote malicious payloads (-urlcache -split) or decode base64 payloads (-decode)."
+
+    PATTERN = re.compile(r"certutil(\.exe)?\s+.*(-urlcache|-decode|-decodehex)", re.IGNORECASE)
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for certutil download/decode flags."""
+        text = get_record_full_text(record)
+        if self.PATTERN.search(text):
+            return Finding(
+                finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+                rule_id=self.rule_id,
+                title=self.title,
+                severity=self.severity,
+                description=self.description,
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary=f"Certutil download or decoding detected: {record.summary}",
+                mitre=self.mitre,
+                details=record.details,
+                )
+        return None
+
+
+class Regsvr32ScrobjRule(BaseRule):
+    """Detects Regsvr32 loading remote SCT scriptlet (Squiblydoo)."""
+
+    rule_id = "waeaa.execution.regsvr32_scrobj"
+    title = "Regsvr32 Scriptlet Remote Execution (Squiblydoo)"
+    severity = Severity.CRITICAL
+    mitre = MitreAttack(
+        tactic="Execution",
+        technique_id="T1218.010",
+        technique_name="System Binary Proxy Execution: Regsvr32",
+    )
+    description = "Regsvr32 loading remote SCT scriptlet via scrobj.dll to bypass application whitelisting."
+
+    PATTERN = re.compile(r"regsvr32(\.exe)?\s+.*(/s|/u|/i:).*(scrobj\.dll|http://|https://)", re.IGNORECASE)
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for regsvr32 scriptlet execution."""
+        text = get_record_full_text(record)
+        if self.PATTERN.search(text):
+            return Finding(
+                finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+                rule_id=self.rule_id,
+                title=self.title,
+                severity=self.severity,
+                description=self.description,
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary=f"Regsvr32 scriptlet execution detected: {record.summary}",
+                mitre=self.mitre,
+                details=record.details,
+            )
+        return None
+
+
+class EncodedPowerShellRule(BaseRule):
+    """Detects PowerShell executed with encoded command line parameters."""
+
+    rule_id = "waeaa.execution.powershell_encoded"
+    title = "Encoded Base64 PowerShell Execution"
+    severity = Severity.HIGH
+    mitre = MitreAttack(
+        tactic="Execution",
+        technique_id="T1059.001",
+        technique_name="Command and Scripting Interpreter: PowerShell",
+    )
+    description = "PowerShell execution with base64 encoded command arguments (-enc, -encodedcommand)."
+
+    PATTERN = re.compile(r"powershell(\.exe)?\s+.*(-enc|-encodedcommand|-e\s+|-ec\s+)\s+[A-Za-z0-9+/=]{10,}", re.IGNORECASE)
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for base64 encoded PowerShell arguments."""
+        text = get_record_full_text(record)
+        if self.PATTERN.search(text):
+            return Finding(
+                finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+                rule_id=self.rule_id,
+                title=self.title,
+                severity=self.severity,
+                description=self.description,
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary=f"Base64 encoded PowerShell invocation: {record.summary}",
+                mitre=self.mitre,
+                details=record.details,
+            )
+        return None
+
+
+class PowerShellDownloadCradleRule(BaseRule):
+    """Detects in-memory PowerShell download cradles."""
+
+    rule_id = "waeaa.execution.powershell_download_cradle"
+    title = "PowerShell In-Memory Download Cradle"
+    severity = Severity.CRITICAL
+    mitre = MitreAttack(
+        tactic="Execution",
+        technique_id="T1059.001",
+        technique_name="Command and Scripting Interpreter: PowerShell",
+    )
+    description = "PowerShell memory download cradle (Net.WebClient DownloadString, IEX, Invoke-RestMethod)."
+
+    PATTERNS = [
+        re.compile(r"(iex|Invoke-Expression)\s*\(?.*(New-Object\s+Net\.WebClient\)\.DownloadString)", re.IGNORECASE),
+        re.compile(r"(iex|Invoke-Expression)\s*\(?.*(Invoke-WebRequest|Invoke-RestMethod|iwr|irm)", re.IGNORECASE),
+        re.compile(r"DownloadData\(|DownloadFile\(", re.IGNORECASE),
+    ]
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for PowerShell download cradles."""
+        text = get_record_full_text(record)
+        for p in self.PATTERNS:
+            if p.search(text):
+                return Finding(
+                    finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+                    rule_id=self.rule_id,
+                    title=self.title,
+                    severity=self.severity,
+                    description=self.description,
+                    timestamp_utc=record.timestamp_utc,
+                    source_artefact=record.source_file,
+                    summary=f"PowerShell download cradle detected: {record.summary}",
+                    mitre=self.mitre,
+                    details=record.details,
+                )
+        return None
+
+
+class WmiRemoteProcessRule(BaseRule):
+    """Detects lateral movement via WMI process creation."""
+
+    rule_id = "waeaa.lateral_movement.wmi_remote_exec"
+    title = "WMI Remote Process Creation (Lateral Movement)"
+    severity = Severity.HIGH
+    mitre = MitreAttack(
+        tactic="Lateral Movement",
+        technique_id="T1047",
+        technique_name="Windows Management Instrumentation",
+    )
+    description = "Remote process invocation using WMIC node parameter or Invoke-WmiMethod."
+
+    PATTERNS = [
+        re.compile(r"wmic(\.exe)?\s+/node:.*process\s+call\s+create", re.IGNORECASE),
+        re.compile(r"Invoke-WmiMethod\s+.*-Class\s+Win32_Process\s+.*-ComputerName", re.IGNORECASE),
+        re.compile(r"Invoke-CimMethod\s+.*-ClassName\s+Win32_Process\s+.*-ComputerName", re.IGNORECASE),
+    ]
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for remote WMI process execution."""
+        text = get_record_full_text(record)
+        for p in self.PATTERNS:
+            if p.search(text):
+                return Finding(
+                    finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+                    rule_id=self.rule_id,
+                    title=self.title,
+                    severity=self.severity,
+                    description=self.description,
+                    timestamp_utc=record.timestamp_utc,
+                    source_artefact=record.source_file,
+                    summary=f"WMI remote process creation: {record.summary}",
+                    mitre=self.mitre,
+                    details=record.details,
+                )
+        return None
+
+
+class WinRmRemoteSessionRule(BaseRule):
+    """Detects WinRM remote PowerShell connections or PSRemoting."""
+
+    rule_id = "waeaa.lateral_movement.winrm_session"
+    title = "WinRM Remote Management Session / PSRemoting"
+    severity = Severity.MEDIUM
+    mitre = MitreAttack(
+        tactic="Lateral Movement",
+        technique_id="T1021.006",
+        technique_name="Remote Services: Windows Remote Management",
+    )
+    description = "Remote PowerShell session establishment or WinRM service connection."
+
+    PATTERNS = [
+        re.compile(r"Enter-PSSession\s+.*-ComputerName", re.IGNORECASE),
+        re.compile(r"Invoke-Command\s+.*-ComputerName", re.IGNORECASE),
+        re.compile(r"winrs(\.exe)?\s+-r:", re.IGNORECASE),
+    ]
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for WinRM remote session commands."""
+        text = get_record_full_text(record)
+        for p in self.PATTERNS:
+            if p.search(text):
+                return Finding(
+                    finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+                    rule_id=self.rule_id,
+                    title=self.title,
+                    severity=self.severity,
+                    description=self.description,
+                    timestamp_utc=record.timestamp_utc,
+                    source_artefact=record.source_file,
+                    summary=f"WinRM remote session detected: {record.summary}",
+                    mitre=self.mitre,
+                    details=record.details,
+                )
+        return None
+
+
+class RdpTunnelingRule(BaseRule):
+    """Detects tunneling or port proxying tools configured for RDP (port 3389)."""
+
+    rule_id = "waeaa.lateral_movement.rdp_tunneling"
+    title = "RDP Port Proxying / Tunneling Utility"
+    severity = Severity.HIGH
+    mitre = MitreAttack(
+        tactic="Lateral Movement",
+        technique_id="T1021.001",
+        technique_name="Remote Services: Remote Desktop Protocol",
+    )
+    description = "Tunneling or port proxy software forwarding RDP port 3389 (Chisel, Plink, Ngrok, Frpc)."
+
+    PATTERN = re.compile(r"(chisel|plink|ngrok|frpc)(\.exe)?\s+.*(3389|R:3389|L:3389)", re.IGNORECASE)
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for RDP tunneling commands."""
+        text = get_record_full_text(record)
+        if self.PATTERN.search(text):
+            return Finding(
+                finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+                rule_id=self.rule_id,
+                title=self.title,
+                severity=self.severity,
+                description=self.description,
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary=f"RDP tunneling utility executed: {record.summary}",
+                mitre=self.mitre,
+                details=record.details,
+            )
+        return None
+
+
+class AdFindReconRule(BaseRule):
+    """Detects Active Directory enumeration via AdFind."""
+
+    rule_id = "waeaa.discovery.adfind_recon"
+    title = "Active Directory Enumeration via AdFind"
+    severity = Severity.HIGH
+    mitre = MitreAttack(
+        tactic="Discovery",
+        technique_id="T1087.002",
+        technique_name="Account Discovery: Domain Account",
+    )
+    description = "Execution of AdFind tool to extract domain controllers, users, groups, and trusts."
+
+    PATTERN = re.compile(r"adfind(\.exe)?\s+.*(-f|-b|-sub|-sc)", re.IGNORECASE)
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for AdFind active directory reconnaissance commands."""
+        text = get_record_full_text(record)
+        if self.PATTERN.search(text):
+            return Finding(
+                finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+                rule_id=self.rule_id,
+                title=self.title,
+                severity=self.severity,
+                description=self.description,
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary=f"AdFind active directory reconnaissance: {record.summary}",
+                mitre=self.mitre,
+                details=record.details,
+            )
+        return None
+
+
+class BloodHoundReconRule(BaseRule):
+    """Detects BloodHound / SharpHound active directory graph collection."""
+
+    rule_id = "waeaa.discovery.bloodhound_sharphound"
+    title = "BloodHound / SharpHound Domain Ingestion"
+    severity = Severity.CRITICAL
+    mitre = MitreAttack(
+        tactic="Discovery",
+        technique_id="T1087.002",
+        technique_name="Account Discovery: Domain Account",
+    )
+    description = "Execution of SharpHound / BloodHound collector to map attack paths across the domain."
+
+    PATTERNS = [
+        re.compile(r"sharphound(\.exe)?", re.IGNORECASE),
+        re.compile(r"bloodhound(\.exe)?", re.IGNORECASE),
+        re.compile(r"-c\s+(all|dconly|session|loggedon)", re.IGNORECASE),
+    ]
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for BloodHound/SharpHound execution."""
+        text = get_record_full_text(record)
+        for p in self.PATTERNS:
+            if p.search(text):
+                return Finding(
+                    finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+                    rule_id=self.rule_id,
+                    title=self.title,
+                    severity=self.severity,
+                    description=self.description,
+                    timestamp_utc=record.timestamp_utc,
+                    source_artefact=record.source_file,
+                    summary=f"BloodHound/SharpHound reconnaissance: {record.summary}",
+                    mitre=self.mitre,
+                    details=record.details,
+                )
+        return None
+
+
+class DomainTrustDiscoveryRule(BaseRule):
+    """Detects domain trust and domain controller discovery commands."""
+
+    rule_id = "waeaa.discovery.domain_trusts"
+    title = "Domain Trust & Controller Discovery"
+    severity = Severity.LOW
+    mitre = MitreAttack(
+        tactic="Discovery",
+        technique_id="T1482",
+        technique_name="Domain Trust Discovery",
+    )
+    description = "Reconnaissance of domain trusts and domain controllers using nltest or dsquery."
+
+    PATTERNS = [
+        re.compile(r"nltest(\.exe)?\s+.*(/domain_trusts|/dclist:)", re.IGNORECASE),
+        re.compile(r"dsquery(\.exe)?\s+server", re.IGNORECASE),
+        re.compile(r"Get-NetDomainTrust", re.IGNORECASE),
+    ]
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for domain trust reconnaissance commands."""
+        text = get_record_full_text(record)
+        for p in self.PATTERNS:
+            if p.search(text):
+                return Finding(
+                    finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+                    rule_id=self.rule_id,
+                    title=self.title,
+                    severity=self.severity,
+                    description=self.description,
+                    timestamp_utc=record.timestamp_utc,
+                    source_artefact=record.source_file,
+                    summary=f"Domain trust reconnaissance: {record.summary}",
+                    mitre=self.mitre,
+                    details=record.details,
+                )
+        return None
+
+
+class BcdeditRecoveryDisabledRule(BaseRule):
+    """Detects disabling Windows boot recovery options via bcdedit."""
+
+    rule_id = "waeaa.impact.bcdedit_recovery_disabled"
+    title = "Windows Recovery Disabled via Bcdedit"
+    severity = Severity.CRITICAL
+    mitre = MitreAttack(
+        tactic="Impact",
+        technique_id="T1490",
+        technique_name="Inhibit System Recovery",
+    )
+    description = "Adversaries disable Windows boot recovery and automatic repair before launching ransomware."
+
+    PATTERNS = [
+        re.compile(r"bcdedit(\.exe)?\s+.*recoveryenabled\s+no", re.IGNORECASE),
+        re.compile(r"bcdedit(\.exe)?\s+.*bootstatuspolicy\s+ignoreallfailures", re.IGNORECASE),
+    ]
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for recovery disablement commands."""
+        text = get_record_full_text(record)
+        for p in self.PATTERNS:
+            if p.search(text):
+                return Finding(
+                    finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+                    rule_id=self.rule_id,
+                    title=self.title,
+                    severity=self.severity,
+                    description=self.description,
+                    timestamp_utc=record.timestamp_utc,
+                    source_artefact=record.source_file,
+                    summary=f"System recovery disabled: {record.summary}",
+                    mitre=self.mitre,
+                    details=record.details,
+                )
+        return None
+
+
+class WbadminCatalogDeleteRule(BaseRule):
+    """Detects deletion of Windows backup catalog via wbadmin."""
+
+    rule_id = "waeaa.impact.wbadmin_delete_catalog"
+    title = "Windows Backup Catalog Deleted (Wbadmin)"
+    severity = Severity.CRITICAL
+    mitre = MitreAttack(
+        tactic="Impact",
+        technique_id="T1490",
+        technique_name="Inhibit System Recovery",
+    )
+    description = "Ransomware precursor: deletion of backup catalog and system state backups using wbadmin."
+
+    PATTERN = re.compile(r"wbadmin(\.exe)?\s+delete\s+(catalog|systemstatebackup)", re.IGNORECASE)
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for backup catalog deletion commands."""
+        text = get_record_full_text(record)
+        if self.PATTERN.search(text):
+            return Finding(
+                finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+                rule_id=self.rule_id,
+                title=self.title,
+                severity=self.severity,
+                description=self.description,
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary=f"Backup catalog deletion: {record.summary}",
+                mitre=self.mitre,
+                details=record.details,
+            )
+        return None
+
+
+class SuspiciousUsbInsertionRule(BaseRule):
+    """Detects connection of USB mass storage devices."""
+
+    rule_id = "waeaa.exfiltration.usb_storage_inserted"
+    title = "External USB Storage Device Inserted"
+    severity = Severity.MEDIUM
+    mitre = MitreAttack(
+        tactic="Exfiltration",
+        technique_id="T1052.001",
+        technique_name="Exfiltration Over Physical Medium: USB",
+    )
+    description = "Physical USB mass storage device connected to the endpoint."
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for USB storage connection events."""
+        if record.artefact_type == "USBDevice" or record.action == "USB_DEVICE_INSTALL":
+            vid = record.details.get("vendor_id", "")
+            pid = record.details.get("product_id", "")
+            dev_id = record.details.get("device_id", record.summary)
+            return Finding(
+                finding_id=f"{self.rule_id}-{record.source_file}-{record.timestamp_utc}",
+                rule_id=self.rule_id,
+                title=self.title,
+                severity=self.severity,
+                description=self.description,
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary=f"USB Storage device plugged in: VID_{vid} PID_{pid} ({dev_id})",
+                mitre=self.mitre,
+                details=record.details,
+            )
+        return None
+
+
+class WerExploitCrashRule(BaseRule):
+    """Detects crash reports in critical system binaries indicative of exploitation."""
+
+    rule_id = "waeaa.defense_evasion.wer_exploit_crash"
+    title = "Suspicious Process Crash in Core Windows Binary"
+    severity = Severity.HIGH
+    mitre = MitreAttack(
+        tactic="Defense Evasion",
+        technique_id="T1068",
+        technique_name="Exploitation for Privilege Escalation",
+    )
+    description = "WER crash report detected for sensitive process (lsass, spoolsv, svchost) with memory corruption exception code."
+
+    SENSITIVE_PROCESSES = ("lsass.exe", "spoolsv.exe", "svchost.exe", "winlogon.exe", "services.exe")
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for critical process crash reports."""
+        if record.artefact_type == "wer_crash":
+            proc = record.process_name.lower()
+            code = str(record.details.get("exception_code", "")).lower()
+            if proc in self.SENSITIVE_PROCESSES or code in ("c0000005", "c0000374", "80000003"):
+                return Finding(
+                    finding_id=f"{self.rule_id}-{record.source_file}-{record.timestamp_utc}",
+                    rule_id=self.rule_id,
+                    title=self.title,
+                    severity=self.severity,
+                    description=self.description,
+                    timestamp_utc=record.timestamp_utc,
+                    source_artefact=record.source_file,
+                    summary=f"Critical binary crash recorded: {proc} (code: {code})",
+                    mitre=self.mitre,
+                    details=record.details,
+                )
+        return None
+
+
 def get_default_detection_rules() -> list[BaseRule]:
     """Instantiate and return standard detection rules."""
     return [
@@ -1033,4 +2163,34 @@ def get_default_detection_rules() -> list[BaseRule]:
         LinuxShadowAccessRule(),
         LinuxReverseShellRule(),
         LinuxCronSuspiciousRule(),
+        LsassMemoryDumpRule(),
+        NtdsutilDumpingRule(),
+        SamHiveExportRule(),
+        KerberoastingRule(),
+        DCSyncRule(),
+        VaultCredentialTheftRule(),
+        DefenderTamperingRule(),
+        AuditpolTamperingRule(),
+        WevtutilLogClearRule(),
+        TimeStompingDiscrepancyRule(),
+        AccessibilityBackdoorRule(),
+        WmiEventSubscriptionRule(),
+        StartupFolderPersistenceRule(),
+        BitsJobPersistenceRule(),
+        NetshPortForwardingRule(),
+        MshtaExecutionRule(),
+        CertutilDownloadRule(),
+        Regsvr32ScrobjRule(),
+        EncodedPowerShellRule(),
+        PowerShellDownloadCradleRule(),
+        WmiRemoteProcessRule(),
+        WinRmRemoteSessionRule(),
+        RdpTunnelingRule(),
+        AdFindReconRule(),
+        BloodHoundReconRule(),
+        DomainTrustDiscoveryRule(),
+        BcdeditRecoveryDisabledRule(),
+        WbadminCatalogDeleteRule(),
+        SuspiciousUsbInsertionRule(),
+        WerExploitCrashRule(),
     ]
