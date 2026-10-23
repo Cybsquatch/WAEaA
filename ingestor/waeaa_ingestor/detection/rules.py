@@ -2,7 +2,7 @@
 
 Evaluates parsed records against MITRE ATT&CK categorized indicators:
 credential dumping, execution of LOLBins, persistence, anti-forensics,
-and Linux-specific exploit patterns.
+RDP intrusion, ransomware indicators, and Linux-specific exploit patterns.
 """
 
 from __future__ import annotations
@@ -12,6 +12,15 @@ from abc import ABC, abstractmethod
 
 from waeaa_ingestor.detection.models import Finding, MitreAttack, Severity
 from waeaa_ingestor.parsers.base import ParsedRecord
+
+
+def get_record_full_text(record: ParsedRecord) -> str:
+    """Concatenate summary, action, source file, and all detail values for robust pattern matching."""
+    parts = [record.summary, record.action, record.source_file]
+    for v in record.details.values():
+        if isinstance(v, (str, int, float)):
+            parts.append(str(v))
+    return " ".join(parts)
 
 
 class BaseRule(ABC):
@@ -67,6 +76,50 @@ class LogClearingRule(BaseRule):
         return None
 
 
+class RdpActivityRule(BaseRule):
+    """Detects Remote Desktop (RDP) authentication, session logon, and incoming connections."""
+
+    rule_id = "waeaa.rdp.connection"
+    title = "Remote Desktop (RDP) Session or Authentication"
+    severity = Severity.HIGH
+    mitre = MitreAttack(
+        tactic="Initial Access",
+        technique_id="T1078.002",
+        technique_name="Valid Accounts: Domain Accounts",
+    )
+    description = (
+        "Remote Desktop session connection, reconnection, or successful authentication detected. "
+        "Adversaries utilize exposed RDP services for initial access, interactive staging, or lateral movement."
+    )
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for incoming RDP session events."""
+        if record.artefact_type != "EventLog":
+            return None
+
+        event_id = record.details.get("event_id")
+        channel = str(record.details.get("channel", "")).lower()
+        provider = str(record.details.get("provider", "")).lower()
+
+        is_rdp_channel = "terminalservices" in channel or "rdp" in channel or "terminalservices" in provider
+        is_rdp_event = event_id in (1149, 21, 22, 24, 25)
+
+        if is_rdp_channel and is_rdp_event:
+            return Finding(
+                finding_id=f"{self.rule_id}-{record.source_file}-{record.timestamp_utc}",
+                rule_id=self.rule_id,
+                title=self.title,
+                severity=self.severity,
+                description=self.description,
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary=record.summary,
+                mitre=self.mitre,
+                details=record.details,
+            )
+        return None
+
+
 class SuspiciousServiceRule(BaseRule):
     """Detects suspicious service installations (Event ID 7045)."""
 
@@ -90,25 +143,23 @@ class SuspiciousServiceRule(BaseRule):
 
     def evaluate(self, record: ParsedRecord) -> Finding | None:
         """Check for suspicious services in event logs or registry."""
-        img = record.details.get("image_path", "")
-        cmd = record.details.get("command", "")
-        text = f"{record.summary} {img} {cmd}"
+        text = get_record_full_text(record)
         is_service = (
             record.details.get("event_id") == 7045 or record.artefact_type == "RegistryService"
         )
         if is_service and self.SUSPICIOUS_PATTERN.search(text):
             return Finding(
-                    finding_id=f"{self.rule_id}-{record.timestamp_utc}",
-                    rule_id=self.rule_id,
-                    title=self.title,
-                    severity=self.severity,
-                    description=self.description,
-                    timestamp_utc=record.timestamp_utc,
-                    source_artefact=record.source_file,
-                    summary=record.summary,
-                    mitre=self.mitre,
-                    details=record.details,
-                )
+                finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+                rule_id=self.rule_id,
+                title=self.title,
+                severity=self.severity,
+                description=self.description,
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary=record.summary,
+                mitre=self.mitre,
+                details=record.details,
+            )
         return None
 
 
@@ -140,11 +191,7 @@ class PowerShellSuspiciousRule(BaseRule):
 
     def evaluate(self, record: ParsedRecord) -> Finding | None:
         """Check command text against malicious PowerShell patterns."""
-        content = (
-            f"{record.summary} "
-            f"{record.details.get('command', '')} "
-            f"{record.details.get('script_text', '')}"
-        )
+        content = get_record_full_text(record)
         if "powershell" not in content.lower() and record.details.get("event_id") != 4104:
             return None
 
@@ -193,7 +240,7 @@ class ShadowCopyDeletionRule(BaseRule):
 
     def evaluate(self, record: ParsedRecord) -> Finding | None:
         """Check for shadow copy deletion in commands or events."""
-        text = f"{record.summary} {record.details.get('command', '')}"
+        text = get_record_full_text(record)
         for p in self.PATTERNS:
             if p.search(text):
                 return Finding(
@@ -238,7 +285,7 @@ class CredentialDumpingRule(BaseRule):
 
     def evaluate(self, record: ParsedRecord) -> Finding | None:
         """Check for credential dumping signatures."""
-        text = f"{record.summary} {record.details.get('command', '')}"
+        text = get_record_full_text(record)
         for p in self.PATTERNS:
             if p.search(text):
                 return Finding(
@@ -282,7 +329,7 @@ class LOLBinsExecutionRule(BaseRule):
 
     def evaluate(self, record: ParsedRecord) -> Finding | None:
         """Check for LOLBins command lines."""
-        text = f"{record.summary} {record.details.get('command', '')}"
+        text = get_record_full_text(record)
         for p in self.PATTERNS:
             if p.search(text):
                 return Finding(
@@ -326,7 +373,7 @@ class ExecutionFromTempRule(BaseRule):
         if record.artefact_type not in ("Prefetch", "ShellHistory", "LNK", "EventLog"):
             return None
 
-        text = f"{record.source_file} {record.summary} {record.details.get('target_path', '')}"
+        text = get_record_full_text(record)
         if self.TEMP_PATTERN.search(text) and (
             record.action in ("Executed", "ShellCommand", "ProcessCreated")
             or record.artefact_type == "Prefetch"
@@ -350,53 +397,65 @@ class RegistryRunPersistenceRule(BaseRule):
     """Detects persistence installed via Run / RunOnce registry keys."""
 
     rule_id = "waeaa.persistence.registry_run"
-    title = "Registry Run Key Persistence"
+    title = "Persistence via Registry Run or Startup Key"
     severity = Severity.HIGH
     mitre = MitreAttack(
         tactic="Persistence",
         technique_id="T1547.001",
-        technique_name="Boot or Logon Autostart Execution: Registry Run Keys",
+        technique_name="Boot or Logon Autostart Execution: Registry Run Keys / Startup Folder",
     )
     description = (
-        "Autostart execution persistence established in Registry Run or RunOnce keys."
+        "Entry identified in autostart execution registry locations "
+        "(CurrentVersion\\Run, RunOnce, Winlogon, or Image File Execution Options)."
+    )
+
+    RUN_KEY_PATTERN = re.compile(
+        r"\\(run|runonce|winlogon|image file execution options)",
+        re.IGNORECASE,
     )
 
     def evaluate(self, record: ParsedRecord) -> Finding | None:
-        """Check for Run key registry records."""
-        if record.artefact_type != "RegistryRunKey":
+        """Check for autostart registry entries."""
+        if record.artefact_type not in ("Registry", "RegistryRunKey"):
+            return None
+
+        path = record.details.get("key_path", "")
+        summary = record.summary.lower()
+        if not (self.RUN_KEY_PATTERN.search(path) or "run key" in summary or record.artefact_type == "RegistryRunKey"):
             return None
 
         val_data = str(record.details.get("value_data", "")).lower()
-        # Escalate if pointing to script interpreters, temp folders, or suspicious extensions
-        if any(term in val_data for term in ("temp", "powershell", "cmd.exe", "mshta", "vbs")):
-            return Finding(
-                finding_id=f"{self.rule_id}-{record.timestamp_utc}",
-                rule_id=self.rule_id,
-                title=self.title,
-                severity=self.severity,
-                description=self.description,
-                timestamp_utc=record.timestamp_utc,
-                source_artefact=record.source_file,
-                summary=record.summary,
-                mitre=self.mitre,
-                details=record.details,
-            )
-        return None
+        if not val_data or val_data in ("(default)", "none"):
+            return None
+
+        return Finding(
+            finding_id=f"{self.rule_id}-{record.timestamp_utc}",
+            rule_id=self.rule_id,
+            title=self.title,
+            severity=self.severity,
+            description=self.description,
+            timestamp_utc=record.timestamp_utc,
+            source_artefact=record.source_file,
+            summary=f"Autostart value in {path}: {val_data[:80]}",
+            mitre=self.mitre,
+            details=record.details,
+        )
 
 
 class LinuxShadowAccessRule(BaseRule):
-    """Detects privileged access or reading of /etc/shadow."""
+    """Detects unauthorized access or tampering with /etc/shadow."""
 
     rule_id = "waeaa.linux.shadow_access"
-    title = "Unauthorized Access to /etc/shadow"
+    title = "Unauthorized Access to Linux Shadow Password Database"
     severity = Severity.HIGH
     mitre = MitreAttack(
         tactic="Credential Access",
         technique_id="T1003.008",
-        technique_name="OS Credential Dumping: /etc/passwd and /etc/shadow",
+        technique_name="/etc/passwd and /etc/shadow",
     )
     description = (
-        "Commands or sudo privileges detected accessing or dumping /etc/shadow password hashes."
+        "Command execution attempting to read, dump, or copy /etc/shadow, "
+        "indicating password hash harvesting."
     )
 
     PATTERN = re.compile(
@@ -406,7 +465,7 @@ class LinuxShadowAccessRule(BaseRule):
 
     def evaluate(self, record: ParsedRecord) -> Finding | None:
         """Check for shadow access commands."""
-        text = f"{record.summary} {record.details.get('command', '')}"
+        text = get_record_full_text(record)
         if self.PATTERN.search(text):
             return Finding(
                 finding_id=f"{self.rule_id}-{record.timestamp_utc}",
@@ -448,7 +507,7 @@ class LinuxReverseShellRule(BaseRule):
 
     def evaluate(self, record: ParsedRecord) -> Finding | None:
         """Check for reverse shell signatures."""
-        text = f"{record.summary} {record.details.get('command', '')}"
+        text = get_record_full_text(record)
         for p in self.PATTERNS:
             if p.search(text):
                 return Finding(
@@ -489,7 +548,7 @@ class LinuxCronSuspiciousRule(BaseRule):
         if record.artefact_type != "CronJob":
             return None
 
-        text = f"{record.summary} {record.details.get('command', '')}"
+        text = get_record_full_text(record)
         if self.PATTERN.search(text):
             return Finding(
                 finding_id=f"{self.rule_id}-{record.timestamp_utc}",
@@ -510,6 +569,7 @@ def get_default_detection_rules() -> list[BaseRule]:
     """Instantiate and return standard detection rules."""
     return [
         LogClearingRule(),
+        RdpActivityRule(),
         SuspiciousServiceRule(),
         PowerShellSuspiciousRule(),
         ShadowCopyDeletionRule(),

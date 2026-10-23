@@ -1,12 +1,13 @@
 """Windows Event Log (.evtx) proprietary binary parser.
 
 Decodes chunk-based EVTX structures, extracts event records, FileTime timestamps,
-Event IDs, channels, providers and EventData XML properties.
+Event IDs, channels, providers, and BinXML event properties.
 """
 
 from __future__ import annotations
 
 import datetime
+import re
 import struct
 from collections.abc import Iterator
 from typing import IO, Any
@@ -47,7 +48,6 @@ class EvtxParser(BaseParser):
             return
 
         offset = 4096
-
         while offset + 65536 <= len(data):
             chunk = data[offset : offset + 65536]
             if chunk[:8] == EVTX_CHUNK_MAGIC:
@@ -56,10 +56,12 @@ class EvtxParser(BaseParser):
 
     def _parse_chunk(self, chunk: bytes, file_path: str) -> Iterator[ParsedRecord]:
         """Parse event records within a 64KB chunk."""
-        free_space_offset = struct.unpack_from("<I", chunk, 56)[0]
+        # Offset 48 in EVTX chunk header is next_record_offset (free space start)
+        free_space_offset = struct.unpack_from("<I", chunk, 48)[0]
+        max_offset = free_space_offset if 512 < free_space_offset <= len(chunk) else len(chunk)
         rec_offset = 512
 
-        while rec_offset < min(free_space_offset, len(chunk) - 24):
+        while rec_offset + 24 <= max_offset:
             if chunk[rec_offset : rec_offset + 4] != EVTX_RECORD_MAGIC:
                 rec_offset += 4
                 continue
@@ -74,7 +76,7 @@ class EvtxParser(BaseParser):
             filetime = struct.unpack_from("<Q", rec_bytes, 16)[0]
             timestamp_utc = filetime_to_iso(filetime)
 
-            # Extract textual XML / BinXML strings from record payload
+            # Extract event metadata from BinXML payload
             extracted = self._extract_event_metadata(rec_bytes[24:])
             event_id = extracted.get("event_id", 0)
             channel = extracted.get("channel", "")
@@ -106,43 +108,67 @@ class EvtxParser(BaseParser):
             rec_offset += length
 
     def _extract_event_metadata(self, payload: bytes) -> dict[str, Any]:
-        """Heuristically extract strings and event fields from BinXML streams."""
+        """Extract event fields from BinXML template instances and string tokens."""
         res: dict[str, Any] = {"event_data": {}}
 
-        # Extract ASCII and UTF-16LE printable strings from payload
-        text_tokens: list[str] = []
-        i = 0
-        while i < len(payload):
-            # Look for null-terminated UTF-16LE strings (2-byte chars where byte2 == 0)
-            if i + 3 < len(payload) and payload[i + 1] == 0 and payload[i + 3] == 0:
-                start = i
-                while i + 1 < len(payload) and payload[i + 1] == 0 and 32 <= payload[i] <= 126:
-                    i += 2
-                if i - start >= 4:
-                    try:
-                        token = payload[start:i].decode("utf-16le")
-                        text_tokens.append(token)
-                    except UnicodeDecodeError:
-                        pass
-            i += 1
+        # 1. Attempt BinXML Template Instance parsing (token 0x0C)
+        if len(payload) >= 22 and payload[4] == 0x0C:
+            try:
+                num_vals = struct.unpack_from("<I", payload, 14)[0]
+                if 0 < num_vals < 500:
+                    desc_off = 18
+                    data_off = 18 + num_vals * 4
+                    if data_off <= len(payload):
+                        curr = data_off
+                        vals: list[tuple[int, int, bytes]] = []
+                        for i in range(num_vals):
+                            v_size, v_type = struct.unpack_from("<HH", payload, desc_off + i * 4)
+                            v_bytes = payload[curr : curr + v_size]
+                            curr += v_size
+                            vals.append((v_type, v_size, v_bytes))
 
-        # Locate EventID, Provider, Computer, Channel from tokens
-        known_channels = {
-            "Security",
-            "System",
-            "Application",
-            "Setup",
-            "Microsoft-Windows-Sysmon/Operational",
-        }
-        for token in text_tokens:
-            if token.isdigit() and 1 <= int(token) <= 65535 and "event_id" not in res:
-                res["event_id"] = int(token)
-            elif "Microsoft-Windows" in token:
-                res["provider"] = token
-            elif token in known_channels:
-                res["channel"] = token
-            elif "." in token and token.isupper() and "computer" not in res:
-                res["computer"] = token
+                        str_idx = 0
+                        for v_type, v_size, b in vals:
+                            if v_type == 0x01 and v_size > 2:
+                                s = b.decode("utf-16le", errors="ignore").rstrip("\x00")
+                                if "Microsoft-Windows" in s or "Service Control Manager" in s:
+                                    res["provider"] = s
+                                elif s in {"Security", "System", "Application", "Setup"} or "Operational" in s:
+                                    res["channel"] = s
+                                elif "." in s and s.isupper() and "computer" not in res:
+                                    res["computer"] = s
+                                else:
+                                    res["event_data"][f"param_{str_idx}"] = s
+                                    str_idx += 1
+                            elif v_type in (0x06, 0x08) and "event_id" not in res:
+                                eid = struct.unpack_from("<H" if v_type == 0x06 else "<I", b)[0]
+                                if 1 <= eid <= 65535:
+                                    res["event_id"] = eid
+                            elif v_type == 0x21 or v_size > 8:
+                                # Embedded XML / BinXML fragment: search for printable strings
+                                u_strs = re.findall(rb"(?:[\x20-\x7e]\x00){3,}", b)
+                                for us in u_strs:
+                                    s = us.decode("utf-16le", errors="ignore").rstrip("\x00")
+                                    if s and len(s) > 2 and s not in res["event_data"].values():
+                                        res["event_data"][f"param_{str_idx}"] = s
+                                        str_idx += 1
+            except Exception:
+                pass
+
+        # 2. Fallback heuristic: Extract text tokens if fields are missing
+        if "event_id" not in res or not res.get("channel") or not res.get("provider"):
+            u_strs = re.findall(rb"(?:[\x20-\x7e]\x00){3,}", payload)
+            tokens = [us.decode("utf-16le", errors="ignore").rstrip("\x00") for us in u_strs]
+
+            for token in tokens:
+                if token.isdigit() and 1 <= int(token) <= 65535 and "event_id" not in res:
+                    res["event_id"] = int(token)
+                elif "Microsoft-Windows" in token and "provider" not in res:
+                    res["provider"] = token
+                elif token in {"Security", "System", "Application", "Setup"} and "channel" not in res:
+                    res["channel"] = token
+                elif "." in token and token.isupper() and "computer" not in res:
+                    res["computer"] = token
 
         if "event_id" not in res:
             res["event_id"] = 0
