@@ -173,3 +173,64 @@ def test_task_scheduler_parser() -> None:
     assert records[0].artefact_type == "ScheduledTask"
     assert records[0].details["task_name"] == "Enterpries backup"
     assert "PsExec.exe" in records[0].details["command"]
+
+
+def test_mft_parser() -> None:
+    from waeaa_ingestor.parsers.windows.mft import MftParser
+
+    parser = MftParser()
+    assert parser.can_parse(r"C:\$MFT") is True
+    assert parser.can_parse("VSS/HarddiskVolumeShadowCopy1/$MFT") is True
+
+    # Construct a valid synthetic 1024-byte MFT record
+    record = bytearray(1024)
+    record[0:4] = b"FILE"
+    struct.pack_into("<H", record, 0x14, 0x30)  # USA offset
+    struct.pack_into("<H", record, 0x16, 3)     # USA count
+    struct.pack_into("<H", record, 0x16, 0x01)  # Flags: in use
+    struct.pack_into("<H", record, 0x30, 0x4242)  # USN
+
+    # Attribute 1: $STANDARD_INFORMATION (0x10) at offset 0x38
+    # Length 64 bytes
+    curr = 0x38
+    struct.pack_into("<I", record, curr, 0x10)       # Type 0x10
+    struct.pack_into("<I", record, curr + 4, 64)     # Length 64
+    record[curr + 8] = 0                             # Resident
+    struct.pack_into("<I", record, curr + 16, 48)    # Content length 48
+    struct.pack_into("<H", record, curr + 20, 24)    # Content offset 24
+    # Timestamps in content: 133485408000000000 (2024-01-01)
+    struct.pack_into("<Q", record, curr + 24, 133485408000000000)
+    struct.pack_into("<Q", record, curr + 32, 133485408000000000)
+
+    # Attribute 2: $FILE_NAME (0x30) at offset 0x38 + 64 = 0x78
+    curr2 = curr + 64
+    name_str = "cmd.exe"
+    name_bytes = name_str.encode("utf-16le")
+    fn_content_len = 66 + len(name_bytes)
+    fn_total_len = (24 + fn_content_len + 7) & ~7
+
+    struct.pack_into("<I", record, curr2, 0x30)
+    struct.pack_into("<I", record, curr2 + 4, fn_total_len)
+    record[curr2 + 8] = 0
+    struct.pack_into("<I", record, curr2 + 16, fn_content_len)
+    struct.pack_into("<H", record, curr2 + 20, 24)
+
+    c_start = curr2 + 24
+    struct.pack_into("<Q", record, c_start, 5)  # Parent ref
+    struct.pack_into("<Q", record, c_start + 8, 133485408000000000)
+    struct.pack_into("<Q", record, c_start + 16, 133485408000000000)
+    struct.pack_into("<Q", record, c_start + 48, 123456)  # Real size
+    record[c_start + 64] = len(name_str)
+    record[c_start + 65] = 1  # Win32 namespace
+    record[c_start + 66 : c_start + 66 + len(name_bytes)] = name_bytes
+
+    # End of attributes
+    struct.pack_into("<I", record, curr2 + fn_total_len, 0xFFFFFFFF)
+
+    recs = list(parser.parse(io.BytesIO(bytes(record)), "$MFT"))
+    assert len(recs) == 1
+    assert recs[0].artefact_type == "MFT"
+    assert recs[0].details["filename"] == "cmd.exe"
+    assert recs[0].details["file_size"] == 123456
+    assert recs[0].details["is_active"] is True
+    assert recs[0].timestamp_utc.startswith("2024-01-01")
