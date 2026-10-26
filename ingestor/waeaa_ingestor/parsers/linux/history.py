@@ -15,27 +15,70 @@ from waeaa_ingestor.parsers.base import BaseParser, ParsedRecord
 
 ZSH_HISTORY_RE = re.compile(r"^:\s*(\d+):\d+;(.*)$")
 
+# Ignored path components that should never be matched as shell history
+_IGNORED_PATH_FRAGMENTS = ("defender", "browser", "terminal server", "quick", "scans", "results")
+
+# Exact shell history base filenames
+_VALID_FILENAMES = {
+    ".bash_history",
+    "bash_history",
+    ".zsh_history",
+    "zsh_history",
+    ".sh_history",
+    "sh_history",
+    ".ash_history",
+    "ash_history",
+    ".history",
+    "history.txt",
+}
+
 
 class ShellHistoryParser(BaseParser):
     """Parser for user bash and zsh command line history files."""
 
     def can_parse(self, file_path: str) -> bool:
         """Report whether file matches shell history naming."""
-        p = file_path.lower()
-        return "bash_history" in p or "zsh_history" in p or "history" in p
+        lower = file_path.lower().replace("\\", "/")
+        if any(ignored in lower for ignored in _IGNORED_PATH_FRAGMENTS):
+            return False
+
+        filename = lower.rsplit("/", 1)[-1]
+        if filename in _VALID_FILENAMES:
+            return True
+        return filename.startswith((".bash_history", ".zsh_history", ".sh_history"))
 
     def parse(self, stream: IO[bytes], file_path: str) -> Iterator[ParsedRecord]:
         """Parse shell history stream."""
+        raw_data = stream.read()
+        if not raw_data:
+            return
+
+        # Skip binary files containing NULL bytes in header
+        if b"\x00" in raw_data[:2048]:
+            return
+
+        # Multi-encoding support: UTF-8 with BOM, UTF-8, Latin-1, CP1252
+        text = ""
+        for enc in ("utf-8-sig", "utf-8", "latin-1", "cp1252"):
+            try:
+                text = raw_data.decode(enc)
+                break
+            except UnicodeDecodeError:
+                continue
+
+        if not text:
+            text = raw_data.decode("utf-8", errors="replace")
+
         pending_timestamp: str = ""
-        user = "root" if "/root" in file_path else "user"
-        if "/home/" in file_path:
-            parts = file_path.split("/home/")[1].split("/")
+        normalized_path = file_path.replace("\\", "/")
+        user = "root" if "/root" in normalized_path else "user"
+        if "/home/" in normalized_path:
+            parts = normalized_path.split("/home/")[1].split("/")
             if parts:
                 user = parts[0]
 
-        for raw_line in stream:
-            line = raw_line.decode("utf-8", errors="replace").strip()
-
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
             if not line:
                 continue
 

@@ -61,6 +61,9 @@ def test_wtmp_parser() -> None:
 def test_shell_history_parser() -> None:
     parser = ShellHistoryParser()
     assert parser.can_parse("/root/.bash_history") is True
+    assert parser.can_parse("/home/alice/.zsh_history") is True
+    # Defender scan history should never be parsed as shell history
+    assert parser.can_parse(r"ProgramData\Microsoft\Windows Defender\Scans\History\Results\Quick\{1057ADF2}") is False
 
     bash_data = (
         b"#1729600000\n"
@@ -72,6 +75,16 @@ def test_shell_history_parser() -> None:
     assert len(records) == 2
     assert records[0].details["command"] == "whoami"
     assert records[1].details["command"] == "cat /etc/shadow"
+
+    # Multi-encoding: Latin-1 accented command
+    latin1_data = "echo 'caffè'".encode("latin-1")
+    latin1_recs = list(parser.parse(io.BytesIO(latin1_data), "/home/bob/.bash_history"))
+    assert len(latin1_recs) == 1
+    assert "caffè" in latin1_recs[0].details["command"]
+
+    # Binary file containing null bytes should be rejected (yield 0 records)
+    binary_data = b"\x00\x01\x02\x03\x04" * 100
+    assert list(parser.parse(io.BytesIO(binary_data), "/home/bob/.bash_history")) == []
 
 
 def test_cron_parser() -> None:
@@ -312,6 +325,19 @@ def test_pshistory_parser() -> None:
     assert len(recs) == 3
     assert recs[0].artefact_type == "PowerShellHistory"
     assert "Invoke-Mimikatz -DumpCreds" in recs[1].summary
+
+    # UTF-16LE without BOM
+    utf16_data = "Get-ChildItem -Path C:\\\nTest-Connection 8.8.8.8\n".encode("utf-16le")
+    utf16_recs = list(parser.parse(io.BytesIO(utf16_data), "ConsoleHost_history.txt"))
+    assert len(utf16_recs) == 2
+    assert "Get-ChildItem" in utf16_recs[0].summary
+    assert "\x00" not in utf16_recs[0].details["command"]
+
+    # UTF-8 with BOM
+    utf8_sig_data = b"\xef\xbb\xbfGet-Service\n"
+    sig_recs = list(parser.parse(io.BytesIO(utf8_sig_data), "ConsoleHost_history.txt"))
+    assert len(sig_recs) == 1
+    assert sig_recs[0].details["command"] == "Get-Service"
 
 
 def test_wer_parser() -> None:

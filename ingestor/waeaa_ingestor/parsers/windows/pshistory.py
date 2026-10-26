@@ -35,17 +35,28 @@ class PowerShellHistoryParser(BaseParser):
             user = u_match.group(1)
 
         text = ""
-        for enc in ("utf-8", "utf-16le", "latin-1"):
-            try:
-                text = raw_data.decode(enc)
-                if text:
+        # Multi-encoding support: BOM detection, UTF-16LE, UTF-8-sig, UTF-8, ANSI/CP1252
+        if raw_data.startswith(b"\xff\xfe"):
+            text = raw_data.decode("utf-16le", errors="replace")
+        elif raw_data.startswith(b"\xfe\xff"):
+            text = raw_data.decode("utf-16be", errors="replace")
+        elif raw_data.startswith(b"\xef\xbb\xbf"):
+            text = raw_data.decode("utf-8-sig", errors="replace")
+        elif b"\x00" in raw_data[:512]:
+            text = raw_data.decode("utf-16le", errors="replace")
+        else:
+            for enc in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+                try:
+                    text = raw_data.decode(enc)
                     break
-            except UnicodeDecodeError:
-                continue
+                except UnicodeDecodeError:
+                    continue
+            if not text:
+                text = raw_data.decode("utf-8", errors="replace")
 
         line_num = 1
         for line in text.splitlines():
-            line = line.strip()
+            line = line.strip().replace("\x00", "")
             if not line:
                 continue
 
