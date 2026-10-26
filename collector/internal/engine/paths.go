@@ -11,11 +11,29 @@ func NormalizeDrive(source string) string {
 	if source == "" {
 		return ""
 	}
-	s := filepath.Clean(source)
+	s := strings.TrimSpace(source)
 	if len(s) == 2 && s[1] == ':' {
 		return s + `\`
 	}
+	s = filepath.Clean(s)
+	if len(s) == 3 && s[1] == ':' && s[2] == '.' {
+		return s[:2] + `\`
+	}
 	return s
+}
+
+// isInsideOrSame reports whether target path is identical to or located inside parent.
+func isInsideOrSame(target, parent string) bool {
+	t := NormalizeDrive(target)
+	p := NormalizeDrive(parent)
+	if strings.EqualFold(t, p) {
+		return true
+	}
+	sep := string(filepath.Separator)
+	if !strings.HasSuffix(p, sep) && !strings.HasSuffix(p, `/`) && !strings.HasSuffix(p, `\`) {
+		p += sep
+	}
+	return strings.HasPrefix(strings.ToLower(t), strings.ToLower(p))
 }
 
 // ExpandPath expands environment variables, adjusts the root drive/mount point,
@@ -38,13 +56,7 @@ func ExpandPath(sourceRoot, rawPath string) ([]string, error) {
 	// If a custom source is specified, ensure it is normalized (e.g. "C:\")
 	if sourceRoot != "" {
 		normSource := NormalizeDrive(sourceRoot)
-		volTarget := filepath.VolumeName(expanded)
-		volSource := filepath.VolumeName(normSource)
-
-		// Re-root if target volume differs from requested source volume or if target has no volume
-		if volTarget != "" && volSource != "" && !strings.EqualFold(volTarget, volSource) {
-			expanded = applySourceRoot(normSource, expanded)
-		} else if volTarget == "" {
+		if !isInsideOrSame(expanded, normSource) {
 			expanded = applySourceRoot(normSource, expanded)
 		}
 	}
@@ -67,6 +79,15 @@ func replaceEnvVar(s, varName, replacement string) string {
 func applySourceRoot(source, target string) string {
 	volSource := filepath.VolumeName(source)
 	volTarget := filepath.VolumeName(target)
+
+	// If on non-Windows OS, filepath.VolumeName will be empty even for Windows paths like "C:\Windows".
+	// Detect Windows drive letter manually if volTarget is empty.
+	if volTarget == "" && len(target) >= 2 && target[1] == ':' {
+		c := target[0]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') {
+			volTarget = target[:2]
+		}
+	}
 
 	// If source is just a drive (e.g. "D:" or "D:\"), preserve the root backslash
 	// because filepath.Join("D:\", "path") on Windows collapses to "D:path".
