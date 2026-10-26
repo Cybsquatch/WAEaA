@@ -146,15 +146,11 @@ class RdpCacheParser(BaseParser):
             return False
 
         # Strictly check if located under Terminal Server Client Cache directory
-        is_rdp_dir = "terminal server client/cache" in lower or "terminal server client\\cache" in lower
-        if is_rdp_dir:
+        if "terminal server client/cache" in lower or "terminal server client\\cache" in lower:
             return True
 
         # Or explicit RDP client cache file naming: bcache*.bmc, bcache*.bin, cache*.bin
-        if filename.startswith("bcache") or filename.startswith("cache0") or filename.startswith("cache1"):
-            return True
-
-        return False
+        return filename.startswith(("bcache", "cache0", "cache1"))
 
     def parse(self, stream: IO[bytes], file_path: str) -> Iterator[ParsedRecord]:
         """Parse RDP cache files, extract tiles, and yield ParsedRecords."""
