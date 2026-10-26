@@ -129,6 +129,12 @@ def test_rdp_cache_parser_and_reconstruction() -> None:
     sample_bmc = "Users/admin/AppData/Local/Microsoft/Terminal Server Client/Cache/bcache24.bmc"
     assert parser.can_parse(sample_bmc) is True
     assert parser.can_parse("bcache.bin") is True
+    assert parser.can_parse("Cache0000.bin") is True
+    assert parser.can_parse("Users/admin/AppData/Local/Microsoft/Terminal Server Client/Cache/Cache0001.bin") is True
+
+    # Windows Defender and non-RDP cache files must NOT be parsed as RDP cache
+    assert parser.can_parse("ProgramData/Microsoft/Windows Defender/Scans/History/CacheManager/1FC0C0C7-0000.bin") is False
+    assert parser.can_parse("Windows/System32/Tasks/Microsoft/Windows/Wininet/CacheTask") is False
 
     # Synthetic 24bpp BMC: 32 bytes header + 12288 bytes (64x64x3) tile data
     tile_data = b"\x00\xFF\x00" * (64 * 64)  # Solid green
@@ -142,6 +148,21 @@ def test_rdp_cache_parser_and_reconstruction() -> None:
     assert len(tiles) == 1
     bmp = tiles[0].to_bmp()
     assert bmp.startswith(b"BM")
+    assert len(bmp) == 54 + (64 * 64 * 3)  # 24bpp bottom-up BMP
+
+    # Synthetic RDP8 .bin cache: RDP8bmp header + 12-byte tile header (<LLHH) + 16384 bytes BGRA
+    bin_file_hdr = b"RDP8bmp\x00\x02\x00\x00\x00"
+    tile_hdr = struct.pack("<LLHH", 101, 202, 64, 64)
+    pixel_data = b"\x00\x00\xFF\x00" * (64 * 64)  # Solid red with 0 alpha (unnormalized)
+    bin_payload = bin_file_hdr + tile_hdr + pixel_data
+    bin_tiles = parser.extract_tiles(bin_payload, "Cache0000.bin")
+    assert len(bin_tiles) == 1
+    assert bin_tiles[0].width == 64
+    assert bin_tiles[0].height == 64
+    # Ensure Alpha was normalized to 255
+    assert bin_tiles[0].bgra_data[3] == 255
+    bin_bmp = bin_tiles[0].to_bmp()
+    assert bin_bmp.startswith(b"BM")
 
     # Test screen reconstruction
     grid = ScreenReconstructor.build_grid_mosaic(tiles)

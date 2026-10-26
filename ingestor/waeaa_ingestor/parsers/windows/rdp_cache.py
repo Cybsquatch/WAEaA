@@ -30,13 +30,24 @@ class RdpTile:
     hash_key: int = 0
 
     def to_bmp(self) -> bytes:
-        """Encode 64x64 BGRA tile as a standalone Windows BMP file."""
-        row_size = self.width * (self.bpp // 8)
+        """Encode 64x64 tile as a standard, universally compatible 24-bit bottom-up Windows BMP."""
+        row_size = self.width * 3
         image_size = row_size * self.height
         file_size = 54 + image_size
 
-        # BMP Header (14 bytes) + DIB Header BITMAPINFOHEADER (40 bytes)
-        # Top-down bitmap specified by negative height (-64)
+        # Invert scanlines to bottom-up order (standard Windows BMP format)
+        # and extract 24-bit BGR from 32-bit BGRA to guarantee universal viewer compatibility
+        # and eliminate transparency/black-box rendering artifacts.
+        pixel_data = bytearray(image_size)
+        stride_in = self.width * 4
+        for y in range(self.height):
+            src_row = y * stride_in
+            dst_row = (self.height - 1 - y) * row_size
+            for x in range(self.width):
+                px_in = src_row + x * 4
+                px_out = dst_row + x * 3
+                pixel_data[px_out : px_out + 3] = self.bgra_data[px_in : px_in + 3]
+
         header = struct.pack(
             "<2sIHHI" "IiiHHIIiiII",
             b"BM",
@@ -44,11 +55,11 @@ class RdpTile:
             0,
             0,
             54,  # Offset to pixel data
-            40,  # DIB header size
+            40,  # DIB header size (BITMAPINFOHEADER)
             self.width,
-            -self.height,  # Negative height = top-down row order
+            self.height,  # Positive height = standard bottom-up row order
             1,  # Planes
-            self.bpp,
+            24,  # 24bpp BI_RGB (BGR)
             0,  # BI_RGB uncompressed
             image_size,
             2835,  # 72 DPI X
@@ -56,7 +67,7 @@ class RdpTile:
             0,
             0,
         )
-        return header + self.bgra_data
+        return header + pixel_data
 
     def get_right_edge(self) -> list[tuple[int, int, int]]:
         """Return RGB tuples of the 64 pixels along the right column."""
@@ -126,12 +137,24 @@ class RdpCacheParser(BaseParser):
     """Proprietary zero-dependency parser for RDP Bitmap Cache (.bmc and .bin) files."""
 
     def can_parse(self, file_path: str) -> bool:
-        """Report whether file_path matches RDP cache naming conventions."""
+        """Report whether file_path matches genuine RDP bitmap cache criteria."""
         lower = file_path.lower().replace("\\", "/")
-        is_cache_path = "terminal server client/cache" in lower or "mstsc" in lower
-        has_ext = lower.endswith(".bin") or lower.endswith(".bmc")
-        is_rdp_name = "bcache" in lower or "cache" in lower
-        return (is_cache_path and has_ext) or (is_rdp_name and has_ext)
+        filename = Path(lower).name
+
+        # Must have cache extension (.bin or .bmc)
+        if not (lower.endswith(".bin") or lower.endswith(".bmc")):
+            return False
+
+        # Strictly check if located under Terminal Server Client Cache directory
+        is_rdp_dir = "terminal server client/cache" in lower or "terminal server client\\cache" in lower
+        if is_rdp_dir:
+            return True
+
+        # Or explicit RDP client cache file naming: bcache*.bmc, bcache*.bin, cache*.bin
+        if filename.startswith("bcache") or filename.startswith("cache0") or filename.startswith("cache1"):
+            return True
+
+        return False
 
     def parse(self, stream: IO[bytes], file_path: str) -> Iterator[ParsedRecord]:
         """Parse RDP cache files, extract tiles, and yield ParsedRecords."""
@@ -161,7 +184,7 @@ class RdpCacheParser(BaseParser):
         tiles: list[RdpTile] = []
         name = Path(file_path).name.lower()
 
-        # Heuristic format detection: .bmc vs .bin
+        # Format detection: .bmc vs .bin
         if name.endswith(".bmc"):
             tiles = self._extract_bmc_tiles(data, file_path)
         else:
@@ -173,28 +196,33 @@ class RdpCacheParser(BaseParser):
         """Extract tiles from modern RDP 8+ .bin cache files."""
         tiles: list[RdpTile] = []
         offset = 0
+        file_len = len(data)
 
-        # Optional RDP8BMCACHE magic header (12-32 bytes)
-        if data.startswith(b"RDP8BMCACHE"):
+        # Check for modern RDP 8 container header:
+        # Signature "RDP8bmp\x00" (8 bytes) + 4 bytes version = 12 bytes
+        if data.startswith(b"RDP8bmp\x00"):
+            offset = 12
+        elif data.startswith(b"RDP8BMCACHE"):
             offset = 32
-        elif len(data) >= 16 and data[:4] == b"\x00\x00\x00\x00":
+        elif file_len >= 16 and data[:4] == b"\x00\x00\x00\x00":
             offset = 16
 
         idx = 0
-        while offset + 16 <= len(data):
-            # Probe for tile header:
-            # HashKey (8 bytes) + Width (2 bytes) + Height (2 bytes) + DataLen (4 bytes)
-            # Typically Width=64 (0x40), Height=64 (0x40)
-            hash_key, w, h = struct.unpack_from("<QHH", data, offset)
-            if w == 64 and h == 64 and offset + 16 <= len(data):
-                data_len = struct.unpack_from("<I", data, offset + 12)[0]
-                chunk_len = data_len if (0 < data_len <= 16384) else (64 * 64 * 4)
+        # In RDP 8+ .bin cache, each tile entry has a 12-byte header:
+        # key1 (4 bytes, uint32) + key2 (4 bytes, uint32) + width (2 bytes, uint16) + height (2 bytes, uint16)
+        # Followed by uncompressed 32bpp pixel data: width * height * 4 bytes (typically 64x64x4 = 16384 bytes).
+        while offset + 12 <= file_len:
+            key1, key2, w, h = struct.unpack_from("<LLHH", data, offset)
 
-                payload_start = offset + 16
-                payload_end = payload_start + chunk_len
-                if payload_end <= len(data):
-                    tile_data = data[payload_start:payload_end]
-                    bgra = self._normalize_to_bgra(tile_data, w, h)
+            # Valid tile dimensions: typically 64x64 (or up to 64)
+            if 0 < w <= 64 and 0 < h <= 64:
+                payload_len = w * h * 4
+                payload_start = offset + 12
+                payload_end = payload_start + payload_len
+
+                if payload_end <= file_len:
+                    raw_pixels = data[payload_start:payload_end]
+                    bgra = self._normalize_to_bgra(raw_pixels, w, h)
                     tiles.append(
                         RdpTile(
                             index=idx,
@@ -203,17 +231,28 @@ class RdpCacheParser(BaseParser):
                             height=64,
                             bpp=32,
                             bgra_data=bgra,
-                            hash_key=hash_key,
+                            hash_key=(key2 << 32) | key1,
                         )
                     )
                     idx += 1
-                    offset = payload_end
+                    # In RDP 8+, tile slots are fixed at 16396 bytes (12 header + 16384 payload)
+                    advance = 12 + max(payload_len, 16384)
+                    offset += advance
                     continue
 
-            # Fallback sequential chunk scanner
-            # Check for uncompressed 32bpp tile (16384 bytes) or 24bpp (12288 bytes)
-            if offset + 16384 <= len(data):
+            # If slot header is empty/deleted (key1=0, key2=0, w=0, h=0) in a 16396-byte slot container
+            if offset + 16396 <= file_len:
+                next_offset = offset + 16396
+                if next_offset + 12 <= file_len:
+                    _, _, nw, nh = struct.unpack_from("<LLHH", data, next_offset)
+                    if 0 < nw <= 64 and 0 < nh <= 64:
+                        offset = next_offset
+                        continue
+
+            # Fallback for raw headerless 16384 (32bpp) or 12288 (24bpp) streams
+            if offset + 16384 <= file_len:
                 raw_chunk = data[offset : offset + 16384]
+                bgra = self._normalize_to_bgra(raw_chunk, 64, 64)
                 tiles.append(
                     RdpTile(
                         index=idx,
@@ -221,13 +260,13 @@ class RdpCacheParser(BaseParser):
                         width=64,
                         height=64,
                         bpp=32,
-                        bgra_data=raw_chunk,
+                        bgra_data=bgra,
                         hash_key=idx,
                     )
                 )
                 idx += 1
                 offset += 16384
-            elif offset + 12288 <= len(data):
+            elif offset + 12288 <= file_len:
                 raw_chunk = data[offset : offset + 12288]
                 bgra = self._convert_24bpp_to_32bpp(raw_chunk)
                 tiles.append(
@@ -289,19 +328,22 @@ class RdpCacheParser(BaseParser):
         return tiles
 
     def _normalize_to_bgra(self, data: bytes, width: int = 64, height: int = 64) -> bytes:
-        """Convert arbitrary tile payload (16bpp, 24bpp, 32bpp) into 64x64 32-bit BGRA bytes."""
+        """Convert arbitrary tile payload (16bpp, 24bpp, 32bpp) into 64x64 32-bit BGRA bytes with full opacity."""
         expected_32 = width * height * 4
-        if len(data) == expected_32:
-            return data
         if len(data) == width * height * 3:
-            return self._convert_24bpp_to_32bpp(data)
-        if len(data) == width * height * 2:
-            return self._convert_16bpp_to_32bpp(data)
+            raw = self._convert_24bpp_to_32bpp(data)
+        elif len(data) == width * height * 2:
+            raw = self._convert_16bpp_to_32bpp(data)
+        elif len(data) >= expected_32:
+            raw = data[:expected_32]
+        else:
+            raw = data + b"\x00" * (expected_32 - len(data))
 
-        # Pad or truncate to 32bpp
-        if len(data) < expected_32:
-            return data + b"\x00" * (expected_32 - len(data))
-        return data[:expected_32]
+        # Enforce Alpha = 255 (100% opaque) for every pixel
+        out = bytearray(raw)
+        for i in range(3, len(out), 4):
+            out[i] = 255
+        return bytes(out)
 
     def _convert_24bpp_to_32bpp(self, bgr_data: bytes) -> bytes:
         """Expand 24-bit BGR pixel stream into 32-bit BGRA (Alpha=255)."""
@@ -474,10 +516,22 @@ class ScreenReconstructor:
 
     @staticmethod
     def _encode_canvas_bmp(canvas: bytearray, width: int, height: int) -> bytes:
-        """Encode raw BGRA buffer as top-down Windows BMP."""
-        row_size = width * 4
+        """Encode raw BGRA buffer as standard 24-bit bottom-up Windows BMP."""
+        row_pad = (4 - (width * 3) % 4) % 4
+        row_size = width * 3 + row_pad
         image_size = row_size * height
         file_size = 54 + image_size
+
+        pixel_data = bytearray(image_size)
+        stride_in = width * 4
+
+        for y in range(height):
+            src_row = y * stride_in
+            dst_row = (height - 1 - y) * row_size
+            for x in range(width):
+                px_in = src_row + x * 4
+                px_out = dst_row + x * 3
+                pixel_data[px_out : px_out + 3] = canvas[px_in : px_in + 3]
 
         header = struct.pack(
             "<2sIHHI" "IiiHHIIiiII",
@@ -488,9 +542,9 @@ class ScreenReconstructor:
             54,
             40,
             width,
-            -height,
+            height,
             1,
-            32,
+            24,
             0,
             image_size,
             2835,
@@ -498,4 +552,4 @@ class ScreenReconstructor:
             0,
             0,
         )
-        return header + canvas
+        return header + pixel_data
