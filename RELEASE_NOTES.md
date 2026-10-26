@@ -47,6 +47,10 @@ Version 1.2.0 introduces comprehensive collection, parsing, and threat detection
 ### RDP Bitmap Cache Tile Rendering Compliance
 * **Lossless 24bpp BMP Export:** Tile decoder conforms strictly to standard bottom-up 24bpp Windows DIB formatting with 4-byte stride padding, resolving preview rendering issues across standard image viewers.
 
+### Shell History Parser & Multi-Encoding Hardening
+* **Strict Artefact Path Whitelist:** Eliminates false-positive parsing of Windows Defender binary scan history or browser data as shell commands.
+* **Universal Encoding Detection:** Native support for UTF-8 with BOM, UTF-16LE/BE, CP1252, and Latin-1 across Linux shell histories and Windows PowerShell console logs.
+
 ---
 
 ## 2. Release Asset Packages
