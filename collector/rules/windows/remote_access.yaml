@@ -1,0 +1,66 @@
+id: win.remote_access
+name: Remote Access and RMM Software
+description: Configuration, session trace, and connection logs for remote access and RMM utilities (AnyDesk, Atera, TeamViewer, ScreenConnect, RustDesk, Splashtop, UltraVNC).
+category: RemoteAccess
+os: windows
+targets:
+  - path: 'Users\*\AppData\Roaming\AnyDesk'
+    mask: '*'
+    recursive: true
+    comment: AnyDesk user logs, traces and connection history
+  - path: 'ProgramData\AnyDesk'
+    mask: '*'
+    recursive: true
+    comment: AnyDesk system logs, service traces and configuration
+  - path: 'Users\*\AppData\Local\AnyDesk'
+    mask: '*'
+    recursive: true
+    comment: AnyDesk local user data
+  - path: 'ProgramData\Atera Networks'
+    mask: '*'
+    recursive: true
+    comment: Atera Agent logs, packages and command execution traces
+  - path: 'Users\*\AppData\Local\Atera Networks'
+    mask: '*'
+    recursive: true
+    comment: Atera user configuration and logs
+  - path: 'Users\*\AppData\Roaming\TeamViewer'
+    mask: '*'
+    recursive: true
+    comment: TeamViewer user logs, connections and configuration
+  - path: 'ProgramData\TeamViewer'
+    mask: '*'
+    recursive: true
+    comment: TeamViewer system logs and incoming connections
+  - path: 'ProgramData\ScreenConnect Client*'
+    mask: '*'
+    recursive: true
+    comment: ConnectWise ScreenConnect client logs and configuration
+  - path: 'Users\*\AppData\Roaming\RustDesk'
+    mask: '*'
+    recursive: true
+    comment: RustDesk remote access configuration and connection logs
+  - path: 'Windows\ServiceProfiles\LocalService\AppData\Roaming\RustDesk'
+    mask: '*'
+    recursive: true
+    comment: RustDesk service configuration and logs
+  - path: 'ProgramData\Splashtop*'
+    mask: '*'
+    recursive: true
+    comment: Splashtop remote access service logs
+  - path: 'Users\*\AppData\Roaming\Splashtop*'
+    mask: '*'
+    recursive: true
+    comment: Splashtop user connection logs
+  - path: 'ProgramData\UltraVNC'
+    mask: '*'
+    recursive: true
+    comment: UltraVNC server logs and configuration
+  - path: 'ProgramData\TightVNC'
+    mask: '*'
+    recursive: true
+    comment: TightVNC server logs and configuration
+  - path: 'ProgramData\LogMeIn*'
+    mask: '*'
+    recursive: true
+    comment: LogMeIn service logs and configuration

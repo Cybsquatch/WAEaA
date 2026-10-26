@@ -340,3 +340,62 @@ def test_wer_parser() -> None:
     assert recs[0].details["fault_module"] == "ntdll.dll"
     assert recs[0].details["exception_code"] == "c0000005"
 
+
+def test_remote_access_parser() -> None:
+    from waeaa_ingestor.parsers.windows.remote_access import RemoteAccessParser
+
+    parser = RemoteAccessParser()
+    assert parser.can_parse(r"AppData\Roaming\AnyDesk\connection_trace.txt") is True
+    assert parser.can_parse(r"ProgramData\AnyDesk\system.conf") is True
+    assert parser.can_parse(r"AppData\Roaming\TeamViewer\Connections_incoming.txt") is True
+    assert parser.can_parse(r"ProgramData\Atera Networks\AteraAgent\AteraAgent.log") is True
+    assert parser.can_parse(r"ProgramData\ScreenConnect Client\ScreenConnect.ClientService.log") is True
+    assert parser.can_parse(r"AppData\Roaming\RustDesk\peers_123.json") is True
+
+    # AnyDesk connection_trace
+    anydesk_data = b"2024-03-12 10:15:33 incoming 987654321 remote_user local_admin 198.51.100.25:49152\n"
+    recs = list(parser.parse(io.BytesIO(anydesk_data), "connection_trace.txt"))
+    assert len(recs) == 1
+    assert recs[0].artefact_type == "RemoteAccess"
+    assert recs[0].action == "AnyDeskIncomingSession"
+    assert recs[0].details["remote_anydesk_id"] == "987654321"
+    assert recs[0].details["ip_address"] == "198.51.100.25"
+
+    # TeamViewer Connections_incoming
+    tv_data = b"12345678  12-03-2024  11:00:00  12-03-2024  11:30:00  SupportUser  RemoteControl  {uuid-123}\n"
+    tv_recs = list(parser.parse(io.BytesIO(tv_data), "connections_incoming.txt"))
+    assert len(tv_recs) == 1
+    assert tv_recs[0].action == "TeamViewerIncomingSession"
+    assert tv_recs[0].details["remote_teamviewer_id"] == "12345678"
+
+    # Atera Agent log
+    atera_data = b"[2024-03-12 12:00:00] Info: Running script C:\\ProgramData\\script.ps1 via PowerShell\n"
+    atera_recs = list(parser.parse(io.BytesIO(atera_data), "AteraAgent.log"))
+    assert len(atera_recs) == 1
+    assert atera_recs[0].action == "AteraAgentActivity"
+
+
+def test_appdata_staging_parser() -> None:
+    from waeaa_ingestor.parsers.windows.appdata import AppDataStagingParser
+
+    parser = AppDataStagingParser()
+    assert parser.can_parse(r"AppData\Local\Temp\malicious.bat") is True
+    assert parser.can_parse(r"AppData\Roaming\payload.exe") is True
+    assert parser.can_parse(r"ProgramData\staged.ps1") is True
+    assert parser.can_parse(r"Windows\System32\notepad.exe") is False
+
+    # Suspicious script with download cradle and shadow copy deletion
+    script_data = b"@echo off\r\nvssadmin delete shadows /all /quiet\r\npowershell -enc ABCDEF==\r\n"
+    recs = list(parser.parse(io.BytesIO(script_data), r"AppData\Local\Temp\stage.bat"))
+    assert len(recs) == 1
+    assert recs[0].artefact_type == "AppDataStaging"
+    assert recs[0].action == "SuspiciousScriptStaged"
+    assert len(recs[0].details["matched_threat_indicators"]) >= 2
+
+    # Binary staged in AppData
+    pe_data = b"MZ\x90\x00" + b"\x00" * 1024
+    pe_recs = list(parser.parse(io.BytesIO(pe_data), r"AppData\Roaming\agent.exe"))
+    assert len(pe_recs) == 1
+    assert pe_recs[0].action == "BinaryStagedInAppData"
+    assert pe_recs[0].details["is_valid_pe"] is True
+

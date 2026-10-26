@@ -442,6 +442,80 @@ def test_wer_exploit_crash_rule() -> None:
     assert finding.severity == Severity.HIGH
 
 
+def test_remote_access_and_appdata_rules() -> None:
+    from waeaa_ingestor.detection.rules import (
+        AppDataBinaryStagedRule,
+        AppDataSuspiciousScriptRule,
+        RemoteAccessAnyDeskRule,
+        RemoteAccessAteraRule,
+    )
+
+    # AnyDesk rule
+    r_anydesk = RemoteAccessAnyDeskRule()
+    rec_anydesk = ParsedRecord(
+        artefact_type="RemoteAccess",
+        source_file="connection_trace.txt",
+        timestamp_utc="2024-03-12T10:15:33Z",
+        action="AnyDeskIncomingSession",
+        summary="AnyDesk Incoming Session: ID 987654321 from 198.51.100.25",
+        user="local_admin",
+        details={"remote_anydesk_id": "987654321", "endpoint": "198.51.100.25:49152"},
+    )
+    f_anydesk = r_anydesk.evaluate(rec_anydesk)
+    assert f_anydesk is not None
+    assert f_anydesk.severity == Severity.HIGH
+    assert f_anydesk.mitre is not None
+    assert f_anydesk.mitre.technique_id == "T1219"
+
+    # Atera rule
+    r_atera = RemoteAccessAteraRule()
+    rec_atera = ParsedRecord(
+        artefact_type="RemoteAccess",
+        source_file="AteraAgent.log",
+        timestamp_utc="2024-03-12T12:00:00Z",
+        action="AteraAgentActivity",
+        summary="Atera RMM Agent Event: Running script C:\\ProgramData\\script.ps1 via PowerShell",
+        details={"software": "Atera"},
+    )
+    f_atera = r_atera.evaluate(rec_atera)
+    assert f_atera is not None
+    assert f_atera.severity == Severity.HIGH
+    assert f_atera.mitre is not None
+    assert f_atera.mitre.technique_id == "T1219"
+
+    # AppData suspicious script
+    r_script = AppDataSuspiciousScriptRule()
+    rec_script = ParsedRecord(
+        artefact_type="AppDataStaging",
+        source_file=r"AppData\Local\Temp\stage.bat",
+        timestamp_utc="",
+        action="SuspiciousScriptStaged",
+        summary="Staged .BAT script with shadow copy deletion",
+        details={"matched_threat_indicators": ["Shadow Copy Deletion / Ransomware"]},
+    )
+    f_script = r_script.evaluate(rec_script)
+    assert f_script is not None
+    assert f_script.severity == Severity.HIGH
+    assert f_script.mitre is not None
+    assert f_script.mitre.technique_id == "T1059"
+
+    # AppData binary staged
+    r_bin = AppDataBinaryStagedRule()
+    rec_bin = ParsedRecord(
+        artefact_type="AppDataStaging",
+        source_file=r"AppData\Roaming\agent.exe",
+        timestamp_utc="",
+        action="BinaryStagedInAppData",
+        summary="Staged PE Binary 'agent.exe'",
+        details={"file_size": 1024, "is_valid_pe": True},
+    )
+    f_bin = r_bin.evaluate(rec_bin)
+    assert f_bin is not None
+    assert f_bin.severity == Severity.MEDIUM
+    assert f_bin.mitre is not None
+    assert f_bin.mitre.technique_id == "T1204.002"
+
+
 def test_default_detection_rules_count() -> None:
     rules = get_default_detection_rules()
     assert len(rules) >= 45

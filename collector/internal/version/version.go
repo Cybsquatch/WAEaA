@@ -16,7 +16,7 @@ import (
 
 var (
 	// Version is the semantic version of the collector.
-	Version = "0.1.0-dev"
+	Version = "1.2.0"
 	// Commit is the git commit hash the binary was built from.
 	Commit = "unknown"
 	// BuildDate is the UTC build timestamp in RFC 3339 format.

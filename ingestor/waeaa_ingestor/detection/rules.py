@@ -2139,6 +2139,203 @@ class WerExploitCrashRule(BaseRule):
         return None
 
 
+class RemoteAccessAnyDeskRule(BaseRule):
+    """Detects AnyDesk incoming or outgoing remote desktop sessions and traces."""
+
+    rule_id = "waeaa.command_and_control.anydesk_remote_session"
+    title = "AnyDesk Remote Access Activity Detected"
+    severity = Severity.HIGH
+    mitre = MitreAttack(
+        tactic="Command and Control",
+        technique_id="T1219",
+        technique_name="Remote Access Software",
+    )
+    description = "AnyDesk remote access session, connection trace, or client activity identified on the endpoint."
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for AnyDesk session activity."""
+        if record.artefact_type == "RemoteAccess" and "anydesk" in record.action.lower():
+            remote_id = record.details.get("remote_anydesk_id", "")
+            endpoint = record.details.get("endpoint", "")
+            user = record.user or record.details.get("username", "")
+            return Finding(
+                finding_id=f"{self.rule_id}-{record.source_file}-{record.timestamp_utc}",
+                rule_id=self.rule_id,
+                title=self.title,
+                severity=self.severity,
+                description=self.description,
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary=record.summary or f"AnyDesk activity: ID {remote_id} User '{user}' Endpoint {endpoint}",
+                mitre=self.mitre,
+                details=record.details,
+            )
+        return None
+
+
+class RemoteAccessAteraRule(BaseRule):
+    """Detects Atera RMM Agent remote commands, script deployments, and management activity."""
+
+    rule_id = "waeaa.command_and_control.atera_rmm_activity"
+    title = "Atera RMM Agent Remote Execution or Activity"
+    severity = Severity.HIGH
+    mitre = MitreAttack(
+        tactic="Command and Control",
+        technique_id="T1219",
+        technique_name="Remote Access Software",
+    )
+    description = "Atera RMM Agent script execution, command line dispatch, or cloud synchronization detected."
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for Atera Agent activity."""
+        if record.artefact_type == "RemoteAccess" and "atera" in record.action.lower():
+            return Finding(
+                finding_id=f"{self.rule_id}-{record.source_file}-{record.timestamp_utc}",
+                rule_id=self.rule_id,
+                title=self.title,
+                severity=self.severity,
+                description=self.description,
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary=record.summary,
+                mitre=self.mitre,
+                details=record.details,
+            )
+        return None
+
+
+class RemoteAccessTeamViewerRule(BaseRule):
+    """Detects TeamViewer remote desktop incoming connections and session activity."""
+
+    rule_id = "waeaa.command_and_control.teamviewer_session"
+    title = "TeamViewer Remote Access Session Detected"
+    severity = Severity.HIGH
+    mitre = MitreAttack(
+        tactic="Command and Control",
+        technique_id="T1219",
+        technique_name="Remote Access Software",
+    )
+    description = "TeamViewer incoming remote connection or session activity logged on the host."
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for TeamViewer session activity."""
+        if record.artefact_type == "RemoteAccess" and "teamviewer" in record.action.lower():
+            return Finding(
+                finding_id=f"{self.rule_id}-{record.source_file}-{record.timestamp_utc}",
+                rule_id=self.rule_id,
+                title=self.title,
+                severity=self.severity,
+                description=self.description,
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary=record.summary,
+                mitre=self.mitre,
+                details=record.details,
+            )
+        return None
+
+
+class RemoteAccessScreenConnectRule(BaseRule):
+    """Detects ConnectWise ScreenConnect client activity and relay sessions."""
+
+    rule_id = "waeaa.command_and_control.screenconnect_session"
+    title = "ScreenConnect Remote Access Activity Detected"
+    severity = Severity.HIGH
+    mitre = MitreAttack(
+        tactic="Command and Control",
+        technique_id="T1219",
+        technique_name="Remote Access Software",
+    )
+    description = "ConnectWise ScreenConnect client session, relay connection, or remote access activity identified."
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for ScreenConnect activity."""
+        if record.artefact_type == "RemoteAccess" and "screenconnect" in record.action.lower():
+            return Finding(
+                finding_id=f"{self.rule_id}-{record.source_file}-{record.timestamp_utc}",
+                rule_id=self.rule_id,
+                title=self.title,
+                severity=self.severity,
+                description=self.description,
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary=record.summary,
+                mitre=self.mitre,
+                details=record.details,
+            )
+        return None
+
+
+class AppDataSuspiciousScriptRule(BaseRule):
+    """Detects scripts staged in AppData or Temp with high-risk command patterns."""
+
+    rule_id = "waeaa.execution.appdata_suspicious_script"
+    title = "Suspicious Script Staged in AppData Directory"
+    severity = Severity.HIGH
+    mitre = MitreAttack(
+        tactic="Execution",
+        technique_id="T1059",
+        technique_name="Command and Scripting Interpreter",
+    )
+    description = "Batch, PowerShell, VBScript, or JScript staged in user AppData/Temp containing high-risk command patterns."
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for suspicious staged script."""
+        if record.artefact_type == "AppDataStaging" and (
+            "suspicious" in record.action.lower() or len(record.details.get("matched_threat_indicators", [])) > 0
+        ):
+            indicators = record.details.get("matched_threat_indicators", [])
+            summary = (
+                f"Staged script with high-risk patterns in '{record.source_file}': {', '.join(indicators)}"
+                if indicators
+                else record.summary
+            )
+            return Finding(
+                finding_id=f"{self.rule_id}-{record.source_file}-{record.timestamp_utc}",
+                rule_id=self.rule_id,
+                title=self.title,
+                severity=self.severity,
+                description=self.description,
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary=summary,
+                mitre=self.mitre,
+                details=record.details,
+            )
+        return None
+
+
+class AppDataBinaryStagedRule(BaseRule):
+    """Detects portable executable binaries (.exe, .dll) staged in user AppData/Temp."""
+
+    rule_id = "waeaa.execution.appdata_binary_staged"
+    title = "Executable Binary Staged in AppData Directory"
+    severity = Severity.MEDIUM
+    mitre = MitreAttack(
+        tactic="Execution",
+        technique_id="T1204.002",
+        technique_name="User Execution: Malicious File",
+    )
+    description = "Portable Executable binary found in user AppData, Temp, or ProgramData volatile staging directories."
+
+    def evaluate(self, record: ParsedRecord) -> Finding | None:
+        """Check for executable in AppData."""
+        if record.artefact_type == "AppDataStaging" and record.action == "BinaryStagedInAppData":
+            return Finding(
+                finding_id=f"{self.rule_id}-{record.source_file}-{record.timestamp_utc}",
+                rule_id=self.rule_id,
+                title=self.title,
+                severity=self.severity,
+                description=self.description,
+                timestamp_utc=record.timestamp_utc,
+                source_artefact=record.source_file,
+                summary=record.summary,
+                mitre=self.mitre,
+                details=record.details,
+            )
+        return None
+
+
 def get_default_detection_rules() -> list[BaseRule]:
     """Instantiate and return standard detection rules."""
     return [
@@ -2193,4 +2390,10 @@ def get_default_detection_rules() -> list[BaseRule]:
         WbadminCatalogDeleteRule(),
         SuspiciousUsbInsertionRule(),
         WerExploitCrashRule(),
+        RemoteAccessAnyDeskRule(),
+        RemoteAccessAteraRule(),
+        RemoteAccessTeamViewerRule(),
+        RemoteAccessScreenConnectRule(),
+        AppDataSuspiciousScriptRule(),
+        AppDataBinaryStagedRule(),
     ]

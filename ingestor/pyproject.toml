@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "waeaa-ingestor"
-version = "0.1.0.dev0"
+version = "1.2.0"
 description = "WAEaA Ingestor: parses WAEaA evidence archives, runs detections and builds an HTML report."
 requires-python = ">=3.11"
 license = { text = "Proprietary" }

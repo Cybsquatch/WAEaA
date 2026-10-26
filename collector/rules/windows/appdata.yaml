@@ -1,0 +1,98 @@
+id: win.appdata
+name: AppData Staging and Execution Artifacts
+description: Executable binaries, scripts, batch files, archives, and configuration files staged in user AppData and ProgramData directories.
+category: Execution
+os: windows
+targets:
+  - path: 'Users\*\AppData\Local\Temp'
+    mask: '*.exe'
+    recursive: true
+    comment: Executables staged in user Temp
+  - path: 'Users\*\AppData\Local\Temp'
+    mask: '*.dll'
+    recursive: true
+    comment: DLLs staged in user Temp
+  - path: 'Users\*\AppData\Local\Temp'
+    mask: '*.bat'
+    recursive: true
+    comment: Batch scripts in user Temp
+  - path: 'Users\*\AppData\Local\Temp'
+    mask: '*.ps1'
+    recursive: true
+    comment: PowerShell scripts in user Temp
+  - path: 'Users\*\AppData\Local\Temp'
+    mask: '*.vbs'
+    recursive: true
+    comment: VBScript files in user Temp
+  - path: 'Users\*\AppData\Local\Temp'
+    mask: '*.js'
+    recursive: true
+    comment: JavaScript files in user Temp
+  - path: 'Users\*\AppData\Local\Temp'
+    mask: '*.hta'
+    recursive: true
+    comment: HTML Applications in user Temp
+  - path: 'Users\*\AppData\Local\Temp'
+    mask: '*.log'
+    recursive: true
+    comment: Logs in user Temp
+  - path: 'Users\*\AppData\Local\Temp'
+    mask: '*.txt'
+    recursive: true
+    comment: Text transcripts in user Temp
+  - path: 'Users\*\AppData\Roaming'
+    mask: '*.exe'
+    recursive: false
+    comment: Executables in AppData Roaming root
+  - path: 'Users\*\AppData\Roaming'
+    mask: '*.dll'
+    recursive: false
+    comment: DLLs in AppData Roaming root
+  - path: 'Users\*\AppData\Roaming'
+    mask: '*.bat'
+    recursive: false
+    comment: Batch scripts in AppData Roaming root
+  - path: 'Users\*\AppData\Roaming'
+    mask: '*.ps1'
+    recursive: false
+    comment: PowerShell scripts in AppData Roaming root
+  - path: 'Users\*\AppData\Roaming'
+    mask: '*.vbs'
+    recursive: false
+    comment: VBScripts in AppData Roaming root
+  - path: 'Users\*\AppData\Local'
+    mask: '*.exe'
+    recursive: false
+    comment: Executables in AppData Local root
+  - path: 'Users\*\AppData\Local'
+    mask: '*.dll'
+    recursive: false
+    comment: DLLs in AppData Local root
+  - path: 'Users\*\AppData\Local'
+    mask: '*.bat'
+    recursive: false
+    comment: Batch scripts in AppData Local root
+  - path: 'Users\*\AppData\Local'
+    mask: '*.ps1'
+    recursive: false
+    comment: PowerShell scripts in AppData Local root
+  - path: 'ProgramData'
+    mask: '*.exe'
+    recursive: false
+    comment: Executables in ProgramData root
+  - path: 'ProgramData'
+    mask: '*.dll'
+    recursive: false
+    comment: DLLs in ProgramData root
+  - path: 'ProgramData'
+    mask: '*.bat'
+    recursive: false
+    comment: Batch scripts in ProgramData root
+  - path: 'ProgramData'
+    mask: '*.ps1'
+    recursive: false
+    comment: PowerShell scripts in ProgramData root
+  - path: 'ProgramData'
+    mask: '*.vbs'
+    recursive: false
+    comment: VBScripts in ProgramData root

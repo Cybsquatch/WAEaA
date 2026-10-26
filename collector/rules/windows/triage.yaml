@@ -25,3 +25,5 @@ rules:
   - win.bits_jobs
   - win.firewall_logs
   - win.wer_crashdumps
+  - win.remote_access
+  - win.appdata
