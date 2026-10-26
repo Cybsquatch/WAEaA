@@ -85,3 +85,60 @@ func TestCustodyHTMLAndJSON(t *testing.T) {
 		t.Errorf("HTML output unexpected: %s", htmlStr)
 	}
 }
+
+func TestResultsTrackerFormatText(t *testing.T) {
+	tracker := NewResultsTracker()
+	tracker.RecordTarget(TargetRecord{
+		RuleID:        "win.eventlogs",
+		Comment:       "Windows Event Logs",
+		Source:        "C:\\",
+		Path:          "C:\\Windows\\System32\\winevt\\Logs",
+		Mask:          "*.evtx",
+		Status:        StatusAcquired,
+		FilesAcquired: 15,
+		BytesAcquired: 1048576,
+	})
+	tracker.RecordTarget(TargetRecord{
+		RuleID:  "win.prefetch",
+		Comment: "Prefetch Files",
+		Source:  "E:\\",
+		Path:    "E:\\Windows\\Prefetch",
+		Mask:    "*.pf",
+		Status:  StatusNotFound,
+		Details: "Path does not exist on source",
+	})
+	tracker.RecordFileError("F:\\corrupt.log", "win.tasks", ioError("file corrupted"))
+
+	rec := &Record{
+		CaseID:        "CASE-01",
+		Examiner:      "Analyst",
+		Hostname:      "HOST1",
+		Platform:      "windows",
+		Architecture:  "amd64",
+		TotalItems:    15,
+		TotalBytes:    1048576,
+		ArchiveName:   "HOST1.zip",
+		ArchiveSHA256: "hash123",
+		RulesExecuted: []string{"win.eventlogs", "win.prefetch"},
+	}
+
+	out := tracker.FormatText(rec, []string{"C:\\", "E:\\"})
+	text := string(out)
+
+	if !strings.Contains(text, "WAEaA FORENSIC EXTRACTION RESULTS") {
+		t.Errorf("Missing header in results.txt")
+	}
+	if !strings.Contains(text, "win.eventlogs") || !strings.Contains(text, "15 files") {
+		t.Errorf("Missing acquired target info in results.txt")
+	}
+	if !strings.Contains(text, "NOT FOUND") || !strings.Contains(text, "win.prefetch") {
+		t.Errorf("Missing skipped target info in results.txt")
+	}
+	if !strings.Contains(text, "file corrupted") {
+		t.Errorf("Missing file read error in results.txt")
+	}
+}
+
+type ioError string
+
+func (e ioError) Error() string { return string(e) }

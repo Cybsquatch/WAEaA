@@ -29,17 +29,23 @@ func ExpandPath(sourceRoot, rawPath string) ([]string, error) {
 		expanded = replaceEnvVar(expanded, "%SystemRoot%", `C:\Windows`)
 	}
 	if strings.Contains(strings.ToLower(expanded), "%systemdrive%") {
-		expanded = replaceEnvVar(expanded, "%SystemDrive%", `C:`)
+		expanded = replaceEnvVar(expanded, "%SystemDrive%", `C:\`)
 	}
 
 	// Clean and standardise separators
 	expanded = filepath.Clean(expanded)
 
-	// If a custom source is specified and not already prefixed, re-root the path
+	// If a custom source is specified, ensure it is normalized (e.g. "C:\")
 	if sourceRoot != "" {
-		cleanSource := filepath.Clean(sourceRoot)
-		if !strings.HasPrefix(strings.ToLower(expanded), strings.ToLower(cleanSource)) {
-			expanded = applySourceRoot(cleanSource, expanded)
+		normSource := NormalizeDrive(sourceRoot)
+		volTarget := filepath.VolumeName(expanded)
+		volSource := filepath.VolumeName(normSource)
+
+		// Re-root if target volume differs from requested source volume or if target has no volume
+		if volTarget != "" && volSource != "" && !strings.EqualFold(volTarget, volSource) {
+			expanded = applySourceRoot(normSource, expanded)
+		} else if volTarget == "" {
+			expanded = applySourceRoot(normSource, expanded)
 		}
 	}
 

@@ -36,7 +36,7 @@ func splitSources(source string) []string {
 	for _, s := range raw {
 		clean := strings.TrimSpace(s)
 		if clean != "" {
-			out = append(out, clean)
+			out = append(out, NormalizeDrive(clean))
 		}
 	}
 	if len(out) == 0 {
@@ -116,6 +116,7 @@ func Run(opts *cli.Options, logger *logging.Logger, tr *i18n.Translator) error {
 	manifest := evidence.NewManifest()
 	dedupMap := make(map[string]string) // sha1 -> original archive path
 	dedupCount := 0
+	tracker := evidence.NewResultsTracker()
 
 	wantMD5 := contains(opts.ExtraHashes, "md5")
 	wantSHA1 := contains(opts.ExtraHashes, "sha1")
@@ -140,21 +141,68 @@ func Run(opts *cli.Options, logger *logging.Logger, tr *i18n.Translator) error {
 				if vr, vErr := ntfs.OpenVolume(vol); vErr == nil {
 					logger.Info("Acquiring raw NTFS metadata", "volume", vol, "mask", target.Mask)
 					stream := vr.ReadInitialMFTStream(100000)
+					filesBeforeMFT := manifest.Count()
+					bytesBeforeMFT := manifest.TotalBytes()
 					collectRawStream(mftPath, relPath, stream, target, sink, manifest, dedupMap, &dedupCount, wantMD5, wantSHA1, logger)
 					vr.Close()
+					diffMFTFiles := manifest.Count() - filesBeforeMFT
+					diffMFTBytes := manifest.TotalBytes() - bytesBeforeMFT
+					tracker.RecordTarget(evidence.TargetRecord{
+						RuleID:        target.RuleID,
+						Comment:       target.Comment,
+						Source:        vol,
+						Path:          mftPath,
+						Mask:          target.Mask,
+						Status:        evidence.StatusAcquired,
+						FilesAcquired: diffMFTFiles,
+						BytesAcquired: diffMFTBytes,
+					})
 					continue
 				} else {
 					logger.Debug("Could not open raw volume for NTFS metadata", "volume", vol, "err", vErr)
+					tracker.RecordTarget(evidence.TargetRecord{
+						RuleID:  target.RuleID,
+						Comment: target.Comment,
+						Source:  vol,
+						Path:    mftPath,
+						Mask:    target.Mask,
+						Status:  statusFromErr(vErr),
+						Details: vErr.Error(),
+					})
 				}
 			}
 
 			expandedPaths, err := ExpandPath(src, target.Path)
 			if err != nil {
 				logger.Debug("Path expansion error", "source", src, "path", target.Path, "err", err)
+				tracker.RecordTarget(evidence.TargetRecord{
+					RuleID:  target.RuleID,
+					Comment: target.Comment,
+					Source:  src,
+					Path:    target.Path,
+					Mask:    target.Mask,
+					Status:  evidence.StatusError,
+					Details: err.Error(),
+				})
+				continue
+			}
+			if len(expandedPaths) == 0 {
+				tracker.RecordTarget(evidence.TargetRecord{
+					RuleID:  target.RuleID,
+					Comment: target.Comment,
+					Source:  src,
+					Path:    target.Path,
+					Mask:    target.Mask,
+					Status:  evidence.StatusNotFound,
+					Details: "Path does not exist on source volume",
+				})
 				continue
 			}
 
 			for _, basePath := range expandedPaths {
+				filesBefore := manifest.Count()
+				bytesBefore := manifest.TotalBytes()
+
 				fi, err := os.Stat(basePath)
 				if err != nil {
 					// Fallback to forensic stat with backup semantics
@@ -162,6 +210,15 @@ func Run(opts *cli.Options, logger *logging.Logger, tr *i18n.Translator) error {
 						fi = ffi
 					} else {
 						logger.Debug("Target path not accessible", "path", basePath, "err", err)
+						tracker.RecordTarget(evidence.TargetRecord{
+							RuleID:  target.RuleID,
+							Comment: target.Comment,
+							Source:  src,
+							Path:    basePath,
+							Mask:    target.Mask,
+							Status:  statusFromErr(err),
+							Details: err.Error(),
+						})
 						continue
 					}
 				}
@@ -169,25 +226,54 @@ func Run(opts *cli.Options, logger *logging.Logger, tr *i18n.Translator) error {
 				if !fi.IsDir() {
 					// Single file target
 					if shouldCollectFile(basePath, fi, target, opts) {
-						collectFile(basePath, fi, target, opts, sink, manifest, dedupMap, &dedupCount, wantMD5, wantSHA1, logger)
+						collectFile(basePath, fi, target, opts, sink, manifest, dedupMap, &dedupCount, wantMD5, wantSHA1, tracker, logger)
+					}
+					diff := manifest.Count() - filesBefore
+					if diff > 0 {
+						tracker.RecordTarget(evidence.TargetRecord{
+							RuleID:        target.RuleID,
+							Comment:       target.Comment,
+							Source:        src,
+							Path:          basePath,
+							Mask:          target.Mask,
+							Status:        evidence.StatusAcquired,
+							FilesAcquired: 1,
+							BytesAcquired: manifest.TotalBytes() - bytesBefore,
+						})
+					} else {
+						tracker.RecordTarget(evidence.TargetRecord{
+							RuleID:  target.RuleID,
+							Comment: target.Comment,
+							Source:  src,
+							Path:    basePath,
+							Mask:    target.Mask,
+							Status:  evidence.StatusNotFound,
+							Details: "File excluded or not accessible",
+						})
 					}
 					continue
 				}
 
 				// Directory target
+				var readErr error
 				if target.Recursive {
 					_ = filepath.Walk(basePath, func(path string, info os.FileInfo, err error) error {
-						if err != nil || info.IsDir() {
+						if err != nil {
+							readErr = err
+							return nil
+						}
+						if info.IsDir() {
 							return nil
 						}
 						if shouldCollectFile(path, info, target, opts) {
-							collectFile(path, info, target, opts, sink, manifest, dedupMap, &dedupCount, wantMD5, wantSHA1, logger)
+							collectFile(path, info, target, opts, sink, manifest, dedupMap, &dedupCount, wantMD5, wantSHA1, tracker, logger)
 						}
 						return nil
 					})
 				} else {
 					entries, err := os.ReadDir(basePath)
 					if err != nil {
+						readErr = err
 						logger.Debug("Directory enumeration failed, attempting direct forensic probes", "dir", basePath, "err", err)
 						// Fallback: If target mask specifies fixed patterns, probe known filenames directly
 						if target.Mask != "" && target.Mask != "*" && !strings.ContainsAny(target.Mask, "?") {
@@ -196,25 +282,56 @@ func Run(opts *cli.Options, logger *logging.Logger, tr *i18n.Translator) error {
 							for _, ext := range extensions {
 								candidatePath := filepath.Join(basePath, stem+ext)
 								if cfi, cErr := ntfs.StatForensic(candidatePath); cErr == nil {
-									collectFile(candidatePath, cfi, target, opts, sink, manifest, dedupMap, &dedupCount, wantMD5, wantSHA1, logger)
+									collectFile(candidatePath, cfi, target, opts, sink, manifest, dedupMap, &dedupCount, wantMD5, wantSHA1, tracker, logger)
 								}
 							}
 						}
-						continue
+					} else {
+						for _, entry := range entries {
+							if entry.IsDir() {
+								continue
+							}
+							info, err := entry.Info()
+							if err != nil {
+								continue
+							}
+							path := filepath.Join(basePath, entry.Name())
+							if shouldCollectFile(path, info, target, opts) {
+								collectFile(path, info, target, opts, sink, manifest, dedupMap, &dedupCount, wantMD5, wantSHA1, tracker, logger)
+							}
+						}
 					}
-					for _, entry := range entries {
-						if entry.IsDir() {
-							continue
-						}
-						info, err := entry.Info()
-						if err != nil {
-							continue
-						}
-						path := filepath.Join(basePath, entry.Name())
-						if shouldCollectFile(path, info, target, opts) {
-							collectFile(path, info, target, opts, sink, manifest, dedupMap, &dedupCount, wantMD5, wantSHA1, logger)
-						}
+				}
+
+				diffFiles := manifest.Count() - filesBefore
+				diffBytes := manifest.TotalBytes() - bytesBefore
+				if diffFiles > 0 {
+					tracker.RecordTarget(evidence.TargetRecord{
+						RuleID:        target.RuleID,
+						Comment:       target.Comment,
+						Source:        src,
+						Path:          basePath,
+						Mask:          target.Mask,
+						Status:        evidence.StatusAcquired,
+						FilesAcquired: diffFiles,
+						BytesAcquired: diffBytes,
+					})
+				} else {
+					status := evidence.StatusEmpty
+					details := fmt.Sprintf("Directory exists on %s but no matching files found", src)
+					if readErr != nil {
+						status = statusFromErr(readErr)
+						details = readErr.Error()
 					}
+					tracker.RecordTarget(evidence.TargetRecord{
+						RuleID:  target.RuleID,
+						Comment: target.Comment,
+						Source:  src,
+						Path:    basePath,
+						Mask:    target.Mask,
+						Status:  status,
+						Details: details,
+					})
 				}
 			}
 		}
@@ -246,7 +363,7 @@ func Run(opts *cli.Options, logger *logging.Logger, tr *i18n.Translator) error {
 						}
 						if !fi.IsDir() {
 							if shouldCollectFile(basePath, fi, vssTarget, opts) {
-								collectFile(basePath, fi, vssTarget, opts, sink, manifest, dedupMap, &dedupCount, wantMD5, wantSHA1, logger)
+								collectFile(basePath, fi, vssTarget, opts, sink, manifest, dedupMap, &dedupCount, wantMD5, wantSHA1, tracker, logger)
 							}
 							continue
 						}
@@ -256,7 +373,7 @@ func Run(opts *cli.Options, logger *logging.Logger, tr *i18n.Translator) error {
 									return nil
 								}
 								if shouldCollectFile(path, info, vssTarget, opts) {
-									collectFile(path, info, vssTarget, opts, sink, manifest, dedupMap, &dedupCount, wantMD5, wantSHA1, logger)
+									collectFile(path, info, vssTarget, opts, sink, manifest, dedupMap, &dedupCount, wantMD5, wantSHA1, tracker, logger)
 								}
 								return nil
 							})
@@ -275,7 +392,7 @@ func Run(opts *cli.Options, logger *logging.Logger, tr *i18n.Translator) error {
 								}
 								path := filepath.Join(basePath, entry.Name())
 								if shouldCollectFile(path, info, vssTarget, opts) {
-									collectFile(path, info, vssTarget, opts, sink, manifest, dedupMap, &dedupCount, wantMD5, wantSHA1, logger)
+									collectFile(path, info, vssTarget, opts, sink, manifest, dedupMap, &dedupCount, wantMD5, wantSHA1, tracker, logger)
 								}
 							}
 						}
@@ -325,8 +442,11 @@ func Run(opts *cli.Options, logger *logging.Logger, tr *i18n.Translator) error {
 	var custodyJSON bytes.Buffer
 	_ = custodyRecord.WriteJSON(&custodyJSON)
 
+	resultsText := tracker.FormatText(custodyRecord, sources)
+
 	_ = sink.AddMetaFile("chain_of_custody.html", custodyHTML)
 	_ = sink.AddMetaFile("chain_of_custody.json", custodyJSON.Bytes())
+	_ = sink.AddMetaFile("results.txt", resultsText)
 
 	// Close sink and seal archive
 	finalPath, archiveHash, err := sink.Close()
@@ -337,13 +457,18 @@ func Run(opts *cli.Options, logger *logging.Logger, tr *i18n.Translator) error {
 	custodyRecord.ArchiveName = filepath.Base(finalPath)
 	custodyRecord.ArchiveSHA256 = archiveHash
 
-	// Also write sidecar chain_of_custody files next to the archive for analyst convenience
+	// Update results text with the final archive sha256
+	resultsText = tracker.FormatText(custodyRecord, sources)
+
+	// Also write sidecar chain_of_custody and results files next to the archive for analyst convenience
 	sidecarDir := filepath.Dir(finalPath)
 	sidecarBase := strings.TrimSuffix(filepath.Base(finalPath), filepath.Ext(finalPath))
 	_ = os.WriteFile(filepath.Join(sidecarDir, sidecarBase+"_custody.json"), custodyJSON.Bytes(), 0644)
 	if updatedHTML, err := custodyRecord.GenerateHTML(); err == nil {
 		_ = os.WriteFile(filepath.Join(sidecarDir, sidecarBase+"_custody.html"), updatedHTML, 0644)
 	}
+	_ = os.WriteFile(filepath.Join(sidecarDir, sidecarBase+"_results.txt"), resultsText, 0644)
+	_ = os.WriteFile(filepath.Join(sidecarDir, "results.txt"), resultsText, 0644)
 
 	logger.Info("Acquisition completed successfully",
 		"destination", finalPath,
@@ -399,6 +524,23 @@ func shouldCollectFile(path string, info os.FileInfo, target rules.Target, opts 
 	return true
 }
 
+func statusFromErr(err error) evidence.TargetStatus {
+	if err == nil {
+		return evidence.StatusAcquired
+	}
+	if os.IsNotExist(err) {
+		return evidence.StatusNotFound
+	}
+	s := strings.ToLower(err.Error())
+	if os.IsPermission(err) || strings.Contains(s, "access") || strings.Contains(s, "negato") {
+		return evidence.StatusAccessDenied
+	}
+	if strings.Contains(s, "corrupt") || strings.Contains(s, "danneggiato") || strings.Contains(s, "illeggibile") {
+		return evidence.StatusCorrupted
+	}
+	return evidence.StatusError
+}
+
 func collectFile(
 	path string,
 	info os.FileInfo,
@@ -409,6 +551,7 @@ func collectFile(
 	dedupMap map[string]string,
 	dedupCount *int,
 	wantMD5, wantSHA1 bool,
+	tracker *evidence.ResultsTracker,
 	logger *logging.Logger,
 ) {
 	relPath := makeArchiveRelativePath(path)
@@ -431,6 +574,9 @@ func collectFile(
 			}
 		}
 		logger.Debug("Failed opening file (may be locked)", "path", path, "err", err)
+		if tracker != nil {
+			tracker.RecordFileError(path, target.RuleID, err)
+		}
 		return
 	}
 	defer f.Close()
@@ -456,6 +602,9 @@ func collectFile(
 	// Stream to buffer for writing into archive
 	if _, err := io.Copy(&buf, tee); err != nil {
 		logger.Debug("Read error while hashing", "path", path, "err", err)
+		if tracker != nil {
+			tracker.RecordFileError(path, target.RuleID, err)
+		}
 		return
 	}
 

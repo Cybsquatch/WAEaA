@@ -34,6 +34,8 @@ type Target struct {
 	AlwaysCollect bool `yaml:"always_collect,omitempty"`
 	// Comment provides forensic context for this specific target.
 	Comment string `yaml:"comment,omitempty"`
+	// RuleID links this target to the parent rule that defined it.
+	RuleID string `yaml:"rule_id,omitempty"`
 }
 
 // Rule defines a forensic artefact rule or a compound rule.
@@ -169,7 +171,12 @@ func (r *Registry) Resolve(requestedIDs []string, targetOS string) ([]*Rule, []T
 	var targets []Target
 	for _, rule := range resolvedRules {
 		if !rule.Compound {
-			targets = append(targets, rule.Targets...)
+			for _, t := range rule.Targets {
+				if t.RuleID == "" {
+					t.RuleID = rule.ID
+				}
+				targets = append(targets, t)
+			}
 		}
 	}
 
