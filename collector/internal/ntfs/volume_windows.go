@@ -33,7 +33,7 @@ type VolumeReader struct {
 
 // OpenVolume opens the raw volume device for drive (e.g. "C:" or "C:\").
 func OpenVolume(drive string) (*VolumeReader, error) {
-	driveLetter := strings.ToUpper(strings.TrimRight(drive, `\/`))
+	driveLetter := strings.ToUpper(strings.TrimRight(strings.TrimSpace(drive), `\/.`))
 	if len(driveLetter) != 2 || driveLetter[1] != ':' {
 		return nil, fmt.Errorf("ntfs: invalid drive specifier %q", drive)
 	}
