@@ -41,3 +41,13 @@ func OpenForensic(path string) (*os.File, error) {
 
 	return os.NewFile(uintptr(h), path), nil
 }
+
+// StatForensic returns file info using forensic bypass semantics (FILE_FLAG_BACKUP_SEMANTICS).
+func StatForensic(path string) (os.FileInfo, error) {
+	f, err := OpenForensic(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return f.Stat()
+}

@@ -6,5 +6,5 @@ os: windows
 targets:
   - path: '%SystemRoot%\System32\winevt\Logs'
     mask: '*.evtx'
-    recursive: false
+    recursive: true
     comment: Standard Windows Event Logs

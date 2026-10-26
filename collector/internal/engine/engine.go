@@ -51,6 +51,9 @@ func Run(opts *cli.Options, logger *logging.Logger, tr *i18n.Translator) error {
 	logger.Info("Starting WAEaA acquisition", "start_utc", startTime.Format(time.RFC3339))
 
 	// Ensure forensic bypass privileges are enabled for reading locked files
+	if !privilege.IsAdmin() {
+		logger.Warn("Running without Administrator privileges: protected system files ($MFT, SAM, active Event Logs) may be skipped or inaccessible.")
+	}
 	if err := privilege.EnableBackupPrivilege(); err != nil {
 		logger.Debug("Could not enable backup privileges", "err", err)
 	}
@@ -124,17 +127,43 @@ func Run(opts *cli.Options, logger *logging.Logger, tr *i18n.Translator) error {
 	for _, src := range sources {
 		for _, target := range targets {
 			logger.Debug("Evaluating target", "source", src, "path", target.Path, "mask", target.Mask, "recursive", target.Recursive)
+
+			// Fast-path for raw NTFS metadata ($MFT, $LogFile, $UsnJrnl)
+			if target.RawNTFS && (strings.HasPrefix(target.Mask, "$MFT") || strings.HasPrefix(target.Mask, "$LogFile") || strings.HasPrefix(target.Mask, "$UsnJrnl")) {
+				vol := filepath.VolumeName(src)
+				if vol == "" {
+					vol = src
+				}
+				vol = NormalizeDrive(vol)
+				mftPath := filepath.Join(vol, target.Mask)
+				relPath := makeArchiveRelativePath(mftPath)
+				if vr, vErr := ntfs.OpenVolume(vol); vErr == nil {
+					logger.Info("Acquiring raw NTFS metadata", "volume", vol, "mask", target.Mask)
+					stream := vr.ReadInitialMFTStream(100000)
+					collectRawStream(mftPath, relPath, stream, target, sink, manifest, dedupMap, &dedupCount, wantMD5, wantSHA1, logger)
+					vr.Close()
+					continue
+				} else {
+					logger.Debug("Could not open raw volume for NTFS metadata", "volume", vol, "err", vErr)
+				}
+			}
+
 			expandedPaths, err := ExpandPath(src, target.Path)
 			if err != nil {
-				logger.Trace("Path expansion error", "source", src, "path", target.Path, "err", err)
+				logger.Debug("Path expansion error", "source", src, "path", target.Path, "err", err)
 				continue
 			}
 
 			for _, basePath := range expandedPaths {
 				fi, err := os.Stat(basePath)
 				if err != nil {
-					logger.Trace("Target path not accessible", "path", basePath, "err", err)
-					continue
+					// Fallback to forensic stat with backup semantics
+					if ffi, ferr := ntfs.StatForensic(basePath); ferr == nil {
+						fi = ffi
+					} else {
+						logger.Debug("Target path not accessible", "path", basePath, "err", err)
+						continue
+					}
 				}
 
 				if !fi.IsDir() {
@@ -159,7 +188,18 @@ func Run(opts *cli.Options, logger *logging.Logger, tr *i18n.Translator) error {
 				} else {
 					entries, err := os.ReadDir(basePath)
 					if err != nil {
-						logger.Trace("Could not read directory", "dir", basePath, "err", err)
+						logger.Debug("Directory enumeration failed, attempting direct forensic probes", "dir", basePath, "err", err)
+						// Fallback: If target mask specifies fixed patterns, probe known filenames directly
+						if target.Mask != "" && target.Mask != "*" && !strings.ContainsAny(target.Mask, "?") {
+							stem := strings.TrimRight(target.Mask, "*")
+							extensions := []string{"", ".LOG", ".LOG1", ".LOG2"}
+							for _, ext := range extensions {
+								candidatePath := filepath.Join(basePath, stem+ext)
+								if cfi, cErr := ntfs.StatForensic(candidatePath); cErr == nil {
+									collectFile(candidatePath, cfi, target, opts, sink, manifest, dedupMap, &dedupCount, wantMD5, wantSHA1, logger)
+								}
+							}
+						}
 						continue
 					}
 					for _, entry := range entries {
